@@ -370,3 +370,121 @@ function sceneDoc(): Document {
   </main>`;
   return doc;
 }
+
+/** Sprint S2: a scene element's placements, listed once per scene file. */
+const TITLE_SCENE = "compositions/title-card.html";
+
+const sceneClip = (overrides: Record<string, unknown>) => ({
+  id: "host",
+  label: "Otsikkokortti",
+  start: 0,
+  duration: 4,
+  kind: "composition",
+  compositionId: "scene",
+  parentCompositionId: null,
+  compositionSrc: TITLE_SCENE,
+  compositionAncestors: ["root"],
+  playbackStart: 0,
+  playbackRate: 1,
+  ...overrides,
+});
+
+describe("buildStudioLook · scenes", () => {
+  it("lists a scene element's placements with their master windows and rate", () => {
+    const look = expectOk<{ scenes: Record<string, unknown>[] }>(
+      buildStudioLook(
+        snapshot({
+          clipManifest: [
+            sceneClip({ id: "title-host-a", compositionId: "title-a", start: 0, duration: 4 }),
+            sceneClip({
+              id: "title-host-b",
+              compositionId: "title-b",
+              start: 4,
+              duration: 4,
+              playbackRate: 1.5,
+            }),
+          ],
+          scene: {
+            status: "ready",
+            items: [
+              layer("Headline", { hfId: "abc", sourceFile: TITLE_SCENE }),
+              layer("Sub", { id: "sub", sourceFile: TITLE_SCENE }),
+              layer("Root", { id: "root" }),
+            ],
+            drillInItem: null,
+          },
+        }),
+      ),
+    );
+
+    // One entry per scene FILE, not per element: the elements key into it.
+    expect(look.scenes).toHaveLength(1);
+    expect(look.scenes[0]).toMatchObject({
+      sourceFile: TITLE_SCENE,
+      affectsInstances: 2,
+      instance: null,
+      unsupported: [],
+    });
+    expect(look.scenes[0]!.instances).toEqual([
+      expect.objectContaining({ hostId: "title-host-a", masterStart: 0, masterEnd: 4 }),
+      expect.objectContaining({
+        hostId: "title-host-b",
+        masterStart: 4,
+        masterEnd: 8,
+        playbackRate: 1.5,
+      }),
+    ]);
+  });
+
+  it("names a single placement outright and reports an untransformable host with a reason", () => {
+    const single = expectOk<{ scenes: { instance: string | null }[] }>(
+      buildStudioLook(
+        snapshot({
+          clipManifest: [sceneClip({ id: "only-host", start: 2, duration: 3 })],
+          scene: {
+            status: "ready",
+            items: [layer("Headline", { hfId: "abc", sourceFile: TITLE_SCENE })],
+            drillInItem: null,
+          },
+        }),
+      ),
+    );
+    expect(single.scenes[0]?.instance).toBe("only-host");
+
+    const broken = expectOk<{
+      scenes: { instances: unknown[]; unsupported: { reason: string; detail: string }[] }[];
+    }>(
+      buildStudioLook(
+        snapshot({
+          clipManifest: [sceneClip({ id: "broken-host", duration: 0 })],
+          scene: {
+            status: "ready",
+            items: [layer("Headline", { hfId: "abc", sourceFile: TITLE_SCENE })],
+            drillInItem: null,
+          },
+        }),
+      ),
+    );
+    expect(broken.scenes[0]?.instances).toEqual([]);
+    expect(broken.scenes[0]?.unsupported[0]).toMatchObject({
+      reason: "unresolved-host-duration",
+      detail: "kohtauksen kesto ei ratkea numerona",
+    });
+  });
+
+  it("says nothing about scenes when every element lives in the open composition", () => {
+    const look = expectOk<{ scenes: unknown[] }>(
+      buildStudioLook(
+        snapshot({
+          scene: {
+            status: "ready",
+            items: [layer("Root", { id: "root" })],
+            drillInItem: null,
+          },
+        }),
+      ),
+    );
+
+    expect(look.scenes).toEqual([]);
+  });
+});

@@ -140,7 +140,11 @@ function buildStudioTools(depsRef: { readonly current: StudioAgentToolsDeps }): 
       annotations: { readOnlyHint: false, untrustedContentHint: true },
       execute: (input): Promise<ToolResult<StudioSelectResult>> =>
         runToolBody("studio_select", () =>
-          studioSelect(depsRef.current, readStringInput(input, "handle")),
+          studioSelect(
+            depsRef.current,
+            readStringInput(input, "handle"),
+            Reflect.get(input, "instance"),
+          ),
         ),
     },
     {
@@ -151,7 +155,11 @@ function buildStudioTools(depsRef: { readonly current: StudioAgentToolsDeps }): 
       annotations: { readOnlyHint: false },
       execute: (input): Promise<ToolResult<StudioSeekResult>> =>
         runToolBody("studio_seek", async () =>
-          studioSeek(depsRef.current, readNumberInput(input, "time")),
+          studioSeek(depsRef.current, {
+            time: readNumberInput(input, "time"),
+            timeBasis: Reflect.get(input, "timeBasis"),
+            instance: Reflect.get(input, "instance"),
+          }),
         ),
     },
     {

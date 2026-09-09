@@ -1,3 +1,4 @@
+import type { StudioMotionOptions } from "../utils/studioMotionPreset";
 import { useCallback, useRef } from "react";
 import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import type { DomEditSelection } from "../components/editor/domEditing";
@@ -36,7 +37,6 @@ export function useGsapSelectionHandlers({
   resizeKeyframedTween,
   convertToKeyframes,
   removeAllKeyframes,
-  handleDomManualEditsReset,
   selectedGsapAnimations,
   showToast,
 }: {
@@ -58,6 +58,8 @@ export function useGsapSelectionHandlers({
     sel: DomEditSelection,
     method: "to" | "from" | "set" | "fromTo",
     time: number,
+    options?: StudioMotionOptions,
+    instance?: string | null,
   ) => Promise<void>;
   addGsapProperty: (sel: DomEditSelection, animId: string, prop: string) => Promise<void>;
   removeGsapProperty: (sel: DomEditSelection, animId: string, prop: string) => Promise<void>;
@@ -227,25 +229,32 @@ export function useGsapSelectionHandlers({
   );
 
   const handleGsapAddAnimation = useCallback(
-    (method: "to" | "from" | "set" | "fromTo", selectionOverride?: DomEditSelection | null) => {
+    (
+      method: "to" | "from" | "set" | "fromTo",
+      selectionOverride?: DomEditSelection | null,
+      options?: StudioMotionOptions,
+      // The caller's chosen placement. A nested add is only ambiguous when the
+      // scene has several placements AND none was named; forwarding this is what
+      // lets an agent add motion inside a scene hosted twice.
+      instance?: string | null,
+    ) => {
       const selection = resolveWriteSelection(selectionOverride);
       if (!selection) return Promise.resolve(false);
       const landed = observeGsapMutation(
-        addGsapAnimation(selection, method, usePlayerStore.getState().currentTime),
+        addGsapAnimation(
+          selection,
+          method,
+          usePlayerStore.getState().currentTime,
+          options,
+          instance,
+        ),
         selection,
         "add",
         `Add GSAP ${method} animation`,
       );
-      if (selection.element.hasAttribute("data-hf-studio-path-offset")) {
-        // The reset owns rollback and the position commit already owns user and
-        // telemetry reporting. This is only the fire-and-forget UI boundary.
-        void landed.then((didLand) => {
-          if (didLand) void handleDomManualEditsReset(selection).catch(() => undefined);
-        });
-      }
       return landed;
     },
-    [resolveWriteSelection, addGsapAnimation, handleDomManualEditsReset, observeGsapMutation],
+    [resolveWriteSelection, addGsapAnimation, observeGsapMutation],
   );
 
   const handleGsapAddProperty = useCallback(

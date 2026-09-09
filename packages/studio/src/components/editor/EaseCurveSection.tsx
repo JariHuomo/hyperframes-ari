@@ -251,10 +251,21 @@ export function EaseCurveSection({
   ease,
   onCustomEaseCommit,
   collidingAnimationTargets,
+  discardDraftOnPointerCancel = false,
 }: {
   ease: string;
   onCustomEaseCommit: (ease: string) => void;
   collidingAnimationTargets?: AnimationKeyframeTarget[];
+  /**
+   * Ari: treat a cancelled pointer as an abort, not as a commit.
+   *
+   * A pointer-cancel is the browser saying the gesture was taken away
+   * (scroll took over, the pen left range, the window lost the pointer).
+   * Committing it writes a curve the author never released, which in Ari's
+   * panel would also be an undoable source change. Default stays upstream's
+   * behaviour so existing callers are untouched.
+   */
+  discardDraftOnPointerCancel?: boolean;
 }) {
   // The ease this section painted optimistically, still waiting for its commit
   // to round-trip back through the `ease` prop.
@@ -375,6 +386,15 @@ export function EaseCurveSection({
     commitEase(`custom(${path})`);
   };
 
+  const handlePointerCancel = () => {
+    if (!discardDraftOnPointerCancel) {
+      handlePointerUp();
+      return;
+    }
+    draggingRef.current = null;
+    setDraft(null);
+  };
+
   const handleKeyDown = (handle: "p1" | "p2", event: React.KeyboardEvent<SVGCircleElement>) => {
     const next = nudgeCurve(displayTuple, handle, event.key, event.shiftKey ? 0.1 : 0.01);
     if (!next) return;
@@ -419,7 +439,7 @@ export function EaseCurveSection({
               className="touch-none select-none"
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
-              onPointerCancel={handlePointerUp}
+              onPointerCancel={handlePointerCancel}
             >
               {/* Grid — quarter lines inside the unit square */}
               {[0.25, 0.5, 0.75].map((q) => (

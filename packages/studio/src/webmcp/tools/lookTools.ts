@@ -13,6 +13,12 @@ import type { DomEditLayerItem, DomEditSelection } from "../../components/editor
 import type { TimelineElement } from "../../player/store/timelineElement";
 import { mintElementHandle, patchTargetAddress, timelineElementAddress } from "../handles";
 import { toolOk, type ToolResult } from "../toolResult";
+import {
+  describeScene as describeSceneInstances,
+  sceneInstanceChoice,
+  type SceneDescription,
+} from "./animationScene";
+import { normalizeSceneSourcePath, type SceneTimeManifestClip } from "../../ari/sceneTime";
 
 export type StudioLookSceneSnapshot =
   | { status: "loading" }
@@ -25,6 +31,8 @@ export type StudioLookSceneSnapshot =
 export interface StudioLookSnapshot {
   projectId: string | null;
   compositionPath: string | null;
+  /** The player's clip manifest, which is where scene placements come from. */
+  clipManifest?: readonly SceneTimeManifestClip[] | null;
   currentTime: number;
   duration: number;
   isPlaying: boolean;
@@ -107,6 +115,13 @@ export interface StudioLook {
   elementCount: number;
   truncated: boolean;
   elements: LookElement[];
+  /**
+   * One entry per nested scene source file present in `elements` (or selected):
+   * where that scene plays in master time, at what rate, and which of its hosts
+   * cannot be transformed and why. An element's `sourceFile` is the key.
+   * `instance` is the placement the panel currently has chosen, never a guess.
+   */
+  scenes: Array<SceneDescription & { instance: string | null }>;
 }
 
 export interface StudioLookInput {
@@ -243,6 +258,39 @@ function describeScene(snapshot: StudioLookSnapshot): {
   };
 }
 
+/**
+ * S2: describe every distinct nested scene file once. Per-element instance lists
+ * would repeat the same rows for every child of the same scene; the agent keys
+ * into this list by an element's `sourceFile` instead.
+ */
+function describeScenes(
+  snapshot: StudioLookSnapshot,
+  elements: readonly LookElement[],
+): StudioLook["scenes"] {
+  const deps = {
+    getClipManifest: () => snapshot.clipManifest ?? null,
+    getCompositionPath: () => snapshot.compositionPath,
+  };
+  const active = normalizeSceneSourcePath(snapshot.compositionPath ?? "index.html");
+  const sources = new Set<string>();
+  for (const source of [
+    ...elements.map((element) => element.sourceFile),
+    snapshot.selection?.sourceFile ?? "",
+  ]) {
+    const normalized = normalizeSceneSourcePath(source);
+    if (normalized && normalized !== active) sources.add(normalized);
+  }
+  const scenes: StudioLook["scenes"] = [];
+  for (const sourceFile of sources) {
+    const described = describeSceneInstances(deps, sourceFile);
+    if (!described) continue;
+    // One placement is unambiguous, so it reports itself even before a click.
+    const only = described.instances.length === 1 ? described.instances[0]!.hostId : null;
+    scenes.push({ ...described, instance: sceneInstanceChoice.forSource(sourceFile) ?? only });
+  }
+  return scenes;
+}
+
 export function buildStudioLook(
   snapshot: StudioLookSnapshot,
   input: StudioLookInput = {},
@@ -281,6 +329,7 @@ export function buildStudioLook(
     elementCount: matched.length,
     truncated: matched.length > limit,
     elements: matched.slice(0, limit),
+    scenes: describeScenes(snapshot, matched),
   });
 }
 
@@ -307,6 +356,9 @@ export const STUDIO_LOOK_DESCRIPTION = [
   "the playhead and duration, what the human currently has selected (including what that",
   "element will and will not accept), and the live nested scene in DOM preorder.",
   "Each scene element includes source ownership, hierarchy, and optional timeline timing.",
+  "`scenes` lists every nested scene file present, each with its placements (hostId, label,",
+  "master window, playback rate) and any host whose time cannot be transformed, with a reason.",
+  "Pass a placement's hostId as `instance` to the animation and seek tools.",
   "Pass a handle back to any tool that edits an element.",
   "Returns an object with `ok: true`, or `ok: false` with `kind`, `reason` and often a `hint`.",
   "`history.undoLabel` is worth checkpointing before a batch: if it later names something",

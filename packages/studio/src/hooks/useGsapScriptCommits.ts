@@ -522,6 +522,7 @@ export function useGsapScriptCommits({ projectIdRef, activeCompPath, previewIfra
   const animationOps = useGsapAnimationOps({
     projectIdRef,
     activeCompPath,
+    getClipManifest: () => usePlayerStore.getState().clipManifest,
     commitMutation,
     commitMutationSafely,
     showToast,

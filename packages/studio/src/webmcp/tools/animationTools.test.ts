@@ -10,6 +10,7 @@ import {
   type StudioAddKeyframeResult,
   type StudioUpdateAnimationResult,
 } from "./animationTools";
+import type { DomEditSelection } from "../../components/editor/domEditingTypes";
 import {
   expectFailure,
   expectOk,
@@ -29,6 +30,7 @@ function animationDeps(overrides: Partial<AnimationToolDeps> = {}): AnimationToo
   const selection = selectionFor(element);
   return {
     ...targetedWriteDeps(selection),
+    getCompositionPath: () => "index.html",
     getAnimationsForSelection: async () => [{ id: "anim-1" }, { id: "anim-gone" }, { id: "a" }],
     readPlayhead: () => ({ currentTime: 2.4, duration: 10, isPlaying: false }),
     addAnimation: async () => true,
@@ -88,13 +90,39 @@ describe("studioAddAnimation", () => {
     const ok = expectOk<StudioAddAnimationResult>(result);
     expect(ok.insertedAtSeconds).toBe(7.25);
     expect(ok.method).toBe("from");
-    expect(addAnimation).toHaveBeenCalledWith(expect.anything(), "from");
+    // A root target has no placement to name.
+    expect(addAnimation).toHaveBeenCalledWith(expect.anything(), "from", undefined, null);
   });
 
   it("marks the result as dispatched after the underlying write settles", async () => {
     const result = await studioAddAnimation(animationDeps(), animationInput({ method: "to" }));
 
     expect(expectOk<StudioAddAnimationResult>(result).dispatched).toBe(true);
+  });
+
+  it("rejects an unknown ease before dispatching, and accepts the wider vocabulary", async () => {
+    const addAnimation = vi.fn(async () => true);
+    const deps = animationDeps({ addAnimation });
+
+    for (const bad of ["power2.uot", "spring(5)", "custom(M0,0 C1.2,0.6 0.3,1 1,1)", ""]) {
+      const result = expectFailure(
+        await studioAddAnimation(deps, animationInput({ method: "from", ease: bad })),
+      );
+      expect(result.kind).toBe("invalid");
+    }
+    expect(addAnimation).not.toHaveBeenCalled();
+
+    const ok = await studioAddAnimation(
+      deps,
+      animationInput({ method: "from", ease: "back.out(1.7)", position: 1, duration: 0.5 }),
+    );
+    expect(expectOk<StudioAddAnimationResult>(ok).ok).toBe(true);
+    expect(addAnimation).toHaveBeenCalledWith(
+      expect.anything(),
+      "from",
+      { position: 1, duration: 0.5, ease: "back.out(1.7)" },
+      null,
+    );
   });
 
   it("rejects an unknown method without dispatching", async () => {
@@ -240,6 +268,79 @@ describe("studioUpdateAnimation", () => {
     );
 
     expect(result).toMatchObject({ ok: false, stage: "refused", kind: "invalid" });
+    expect(updateAnimation).not.toHaveBeenCalled();
+  });
+
+  it("refuses a misspelled ease BEFORE writing, so it never reaches the source", async () => {
+    // power2.uot reads back byte-identical and would verify, while GSAP quietly
+    // plays its default curve. The only place to catch it is before the write.
+    const updateAnimation = vi.fn();
+
+    const result = expectFailure(
+      await studioUpdateAnimation(
+        animationDeps({ updateAnimation }),
+        animationInput({ animationId: "anim-1", ease: "power2.uot" }),
+      ),
+    );
+
+    expect(result.kind).toBe("invalid");
+    expect(result.reason).toMatch(/Tuntematon käyrä/);
+    expect(updateAnimation).not.toHaveBeenCalled();
+  });
+
+  it("accepts the whole closed vocabulary and writes it normalised", async () => {
+    for (const [requested, saved] of [
+      ["bounce.out", "bounce.out"],
+      ["elastic.out(1,0.45)", "elastic.out(1, 0.45)"],
+      ["custom(M0,0 C0.2150,0.61 0.355,1 1,1)", "custom(M0,0 C0.215,0.61 0.355,1 1,1)"],
+      ["spring(0.50)", "spring(0.5)"],
+      ["wiggle(6, easeOut)", "wiggle(6,easeOut)"],
+      ["hold", "hold"],
+    ]) {
+      const updateAnimation = vi.fn(async () => true);
+      const result = await studioUpdateAnimation(
+        animationDeps({ updateAnimation }),
+        animationInput({ animationId: "anim-1", ease: requested }),
+      );
+
+      expect(expectOk<StudioUpdateAnimationResult>(result).updated).toEqual({ ease: saved });
+      expect(updateAnimation).toHaveBeenCalledWith(expect.anything(), "anim-1", { ease: saved });
+    }
+  });
+
+  it("writes a keyframe animation's feel to easeEach, like the animation card", async () => {
+    const updateAnimation = vi.fn(async () => true);
+
+    const result = await studioUpdateAnimation(
+      animationDeps({
+        getAnimationsForSelection: async () => [
+          { id: "anim-1", keyframes: { format: "percentage", keyframes: [] } },
+        ],
+        updateAnimation,
+      }),
+      animationInput({ animationId: "anim-1", ease: "power3.out" }),
+    );
+
+    expect(expectOk<StudioUpdateAnimationResult>(result).updated).toEqual({
+      easeEach: "power3.out",
+    });
+    expect(updateAnimation).toHaveBeenCalledWith(expect.anything(), "anim-1", {
+      easeEach: "power3.out",
+    });
+  });
+
+  it("refuses easeEach on an animation that has no keyframes", async () => {
+    const updateAnimation = vi.fn();
+
+    const result = expectFailure(
+      await studioUpdateAnimation(
+        animationDeps({ updateAnimation }),
+        animationInput({ animationId: "anim-1", easeEach: "power3.out" }),
+      ),
+    );
+
+    expect(result.kind).toBe("invalid");
+    expect(result.reason).toMatch(/no keyframes/);
     expect(updateAnimation).not.toHaveBeenCalled();
   });
 });
@@ -421,5 +522,277 @@ describe("studioDeleteAnimation", () => {
 
     expect(result).toMatchObject({ ok: false, stage: "refused", kind: "invalid" });
     expect(deleteAnimation).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Sprint S4/S5: the same twelve tools, now aware of both clocks. Every number
+ * here comes from the clip manifest; nothing is inferred from the element.
+ */
+const TITLE_SCENE = "compositions/title-card.html";
+const PACK_SCENE = "compositions/pack-grid.html";
+
+const sceneClip = (overrides: Record<string, unknown>) => ({
+  id: "host",
+  label: "Otsikkokortti",
+  start: 0,
+  duration: 4,
+  kind: "composition",
+  compositionId: "scene",
+  parentCompositionId: null,
+  compositionSrc: TITLE_SCENE,
+  compositionAncestors: ["root"],
+  playbackStart: 0,
+  playbackRate: 1,
+  ...overrides,
+});
+
+const SCENE_MANIFEST = [
+  sceneClip({ id: "title-host-a", compositionId: "title-a", start: 0, duration: 4 }),
+  sceneClip({ id: "title-host-b", compositionId: "title-b", start: 4, duration: 4 }),
+  sceneClip({
+    id: "pack-host",
+    compositionId: "pack",
+    compositionSrc: PACK_SCENE,
+    start: 2,
+    duration: 5,
+  }),
+];
+
+function nestedDeps(
+  sourceFile: string,
+  overrides: Partial<AnimationToolDeps> = {},
+): AnimationToolDeps {
+  const element = previewElement('<h1 id="headline">Ship it</h1>', "headline");
+  const selection = selectionFor(element, { sourceFile });
+  return {
+    ...animationDeps(overrides),
+    ...targetedWriteDeps(selection),
+    getClipManifest: () => SCENE_MANIFEST,
+    getCompositionPath: () => "index.html",
+    ...overrides,
+  };
+}
+
+describe("studioAddAnimation · nested scene time", () => {
+  it("writes the scene-local position for a master-time request and reports both times", async () => {
+    const addAnimation = vi.fn(async () => true);
+
+    const result = await studioAddAnimation(
+      nestedDeps(TITLE_SCENE, { addAnimation }),
+      animationInput({
+        method: "from",
+        position: 5,
+        duration: 0.5,
+        timeBasis: "master",
+        instance: "title-host-b",
+      }),
+    );
+
+    // The writer needs the chosen placement too: without it a scene hosted
+    // twice is ambiguous down in the ops hook and the add never lands.
+    expect(addAnimation).toHaveBeenCalledWith(
+      expect.anything(),
+      "from",
+      expect.objectContaining({ position: 1, duration: 0.5 }),
+      "title-host-b",
+    );
+    const ok = expectOk<StudioAddAnimationResult>(result);
+    expect(ok.insertedAtSeconds).toBe(1);
+    expect(ok.affectsInstances).toBe(2);
+    expect(ok.scene).toMatchObject({
+      sourceFile: TITLE_SCENE,
+      instance: "title-host-b",
+      instanceIndex: 2,
+      instanceCount: 2,
+      timeBasis: "master",
+      localPosition: 1,
+      masterPosition: 5,
+    });
+  });
+
+  it("refuses a two-instance target with no instance before anything is written", async () => {
+    const addAnimation = vi.fn(async () => true);
+
+    const result = expectFailure(
+      await studioAddAnimation(
+        nestedDeps(TITLE_SCENE, { addAnimation }),
+        animationInput({ method: "from", position: 1, duration: 0.5 }),
+      ),
+    );
+
+    expect(result.kind).toBe("invalid");
+    expect(result.reason).toContain("2 esiintymää");
+    expect(addAnimation).not.toHaveBeenCalled();
+  });
+
+  it("hands the writer the scene file and its auto-selected placement", async () => {
+    const addAnimation = vi.fn(async () => true);
+    const readAnimationSource = vi.fn(async (selection: DomEditSelection) => ({
+      sourceFile: selection.sourceFile || "index.html",
+      version: "v",
+      animations: [],
+    }));
+
+    await studioAddAnimation(
+      nestedDeps(PACK_SCENE, { addAnimation, readAnimationSource }),
+      animationInput({ method: "from", position: 3.2, duration: 0.4, timeBasis: "master" }),
+    );
+
+    expect(addAnimation).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceFile: PACK_SCENE }),
+      "from",
+      expect.objectContaining({ position: 1.2 }),
+      "pack-host",
+    );
+    // Readback reads the SCENE's own file, never the master's script.
+    expect(readAnimationSource.mock.calls.every(([sel]) => sel.sourceFile === PACK_SCENE)).toBe(
+      true,
+    );
+  });
+
+  it("verifies a nested add against the scene source, not the master composition", async () => {
+    const added = {
+      id: "#headline-from-1200-visual",
+      targetSelector: "#headline",
+      method: "from",
+      position: 1.2,
+      duration: 0.4,
+      ease: "power2.out",
+      properties: { opacity: 0 },
+    };
+    let landed = false;
+    const readAnimationSource = vi.fn(async (selection: DomEditSelection) => ({
+      sourceFile: selection.sourceFile || "index.html",
+      version: landed ? "v2" : "v1",
+      // The master's script is a different file and must not be consulted.
+      animations: selection.sourceFile === PACK_SCENE && landed ? [added] : [],
+    }));
+
+    const ok = expectOk<StudioAddAnimationResult>(
+      await studioAddAnimation(
+        nestedDeps(PACK_SCENE, {
+          readAnimationSource,
+          addAnimation: async () => {
+            landed = true;
+            return true;
+          },
+        }),
+        animationInput({ method: "from", position: 3.2, duration: 0.4, timeBasis: "master" }),
+      ),
+    );
+
+    expect(ok.stage).toBe("verified");
+    expect(ok.animationId).toBe(added.id);
+    expect(ok.scene).toMatchObject({ sourceFile: PACK_SCENE, localPosition: 1.2 });
+  });
+
+  it("auto-selects the only placement and defaults to the scene's own clock", async () => {
+    const addAnimation = vi.fn(async () => true);
+
+    const ok = expectOk<StudioAddAnimationResult>(
+      await studioAddAnimation(
+        nestedDeps(PACK_SCENE, { addAnimation }),
+        animationInput({ method: "from", position: 1.2, duration: 0.4 }),
+      ),
+    );
+
+    expect(ok.scene).toMatchObject({
+      instance: "pack-host",
+      timeBasis: "scene",
+      localPosition: 1.2,
+      masterPosition: 3.2,
+    });
+    expect(ok.affectsInstances).toBe(1);
+  });
+
+  it("refuses a motion that would end after the host stops showing the scene", async () => {
+    const addAnimation = vi.fn(async () => true);
+
+    const result = expectFailure(
+      await studioAddAnimation(
+        nestedDeps(TITLE_SCENE, { addAnimation }),
+        animationInput({
+          method: "from",
+          position: 3.5,
+          duration: 1,
+          instance: "title-host-a",
+        }),
+      ),
+    );
+
+    expect(result.reason).toBe("liike ei näy pääajassa (kohtaus loppuu 4,00 s)");
+    expect(addAnimation).not.toHaveBeenCalled();
+  });
+
+  it("keeps a root-composition add on the existing master-time fit check", async () => {
+    const addAnimation = vi.fn(async () => true);
+
+    const result = expectFailure(
+      await studioAddAnimation(
+        animationDeps({ addAnimation }),
+        animationInput({ method: "from", position: 9.8, duration: 1 }),
+      ),
+    );
+
+    expect(result.reason).toBe("motion must fit within the composition");
+    expect(addAnimation).not.toHaveBeenCalled();
+  });
+});
+
+describe("studioUpdateAnimation · nested scene time", () => {
+  it("converts a master position before the update and carries both times", async () => {
+    const updateAnimation = vi.fn(async () => true);
+
+    const ok = expectOk<StudioUpdateAnimationResult>(
+      await studioUpdateAnimation(
+        nestedDeps(TITLE_SCENE, { updateAnimation }),
+        animationInput({
+          animationId: "anim-1",
+          position: 5,
+          timeBasis: "master",
+          instance: "title-host-b",
+        }),
+      ),
+    );
+
+    expect(updateAnimation).toHaveBeenCalledWith(
+      expect.anything(),
+      "anim-1",
+      expect.objectContaining({ position: 1 }),
+    );
+    expect(ok.scene).toMatchObject({ localPosition: 1, masterPosition: 5, affectsInstances: 2 });
+    expect(ok.affectsInstances).toBe(2);
+  });
+
+  it("refuses an ambiguous instance before the update lands", async () => {
+    const updateAnimation = vi.fn(async () => true);
+
+    const result = expectFailure(
+      await studioUpdateAnimation(
+        nestedDeps(TITLE_SCENE, { updateAnimation }),
+        animationInput({ animationId: "anim-1", position: 1 }),
+      ),
+    );
+
+    expect(result.kind).toBe("invalid");
+    expect(result.reason).toContain("valitse instance");
+    expect(updateAnimation).not.toHaveBeenCalled();
+  });
+
+  it("leaves an ease-only update alone: no position, no scene conversion", async () => {
+    const updateAnimation = vi.fn(async () => true);
+
+    const ok = expectOk<StudioUpdateAnimationResult>(
+      await studioUpdateAnimation(
+        nestedDeps(TITLE_SCENE, { updateAnimation }),
+        animationInput({ animationId: "anim-1", ease: "power3.out" }),
+      ),
+    );
+
+    expect(ok.scene).toBeUndefined();
+    expect(updateAnimation).toHaveBeenCalledWith(expect.anything(), "anim-1", {
+      ease: "power3.out",
+    });
   });
 });

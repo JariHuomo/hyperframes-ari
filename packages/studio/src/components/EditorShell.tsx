@@ -1,5 +1,5 @@
 // Modified for Ari Studio; changes documented in /ARI.md.
-import { useCallback, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { PreviewPane } from "./nle/PreviewPane";
 import { TimelinePane } from "./nle/TimelinePane";
 import { PreviewOverlays } from "./nle/PreviewOverlays";
@@ -240,6 +240,9 @@ function EditorShellBody({
   const { compositionStack, updateCompositionStack, containerRef } = useNLEContext();
   const focusMode = usePlayerStore((state) => state.studioFocusMode);
   const setFocusMode = usePlayerStore((state) => state.setStudioFocusMode);
+  const [ariLayers, setAriLayers] = useState<HTMLDivElement | null>(null);
+  const [ariTimeline, setAriTimeline] = useState<HTMLDivElement | null>(null);
+  const [ariDock, setAriDock] = useState<HTMLDivElement | null>(null);
 
   // The caption track's blocks are seek targets; CaptionTimeline took an onSeek
   // prop that nothing ever passed, so clicking a block did nothing.
@@ -267,10 +270,17 @@ function EditorShellBody({
       tabIndex={-1}
     >
       {/* Shared agent tools and Ari controls need the same DomEdit contexts. */}
-      <StudioAgentTools focusMode={focusMode} onToggleFocus={() => setFocusMode(!focusMode)} />
+      <StudioAgentTools
+        focusMode={focusMode}
+        onToggleFocus={() => setFocusMode(!focusMode)}
+        commandPanelHost={ariDock}
+        layersHost={ariLayers}
+        timelineHost={ariTimeline}
+      />
       {/* Top row: [left | preview | right] — outer padding + the 8px resize
           seams give the panels CapCut-style separation on the dark canvas. */}
       <div className="flex flex-row flex-1 min-h-0 px-px pt-px">
+        <div ref={setAriLayers} className="w-44 xl:w-52 shrink-0 min-h-0 empty:hidden" />
         {!focusMode && left}
         <div className="flex-1 min-w-0 flex flex-col relative">
           <PreviewPane
@@ -280,8 +290,14 @@ function EditorShellBody({
           />
         </div>
         {!focusMode && right}
+        <div
+          ref={setAriDock}
+          aria-label="Ari työkalut"
+          className="w-[320px] xl:w-[340px] shrink-0 min-h-0 empty:hidden"
+        />
       </div>
 
+      <div ref={setAriTimeline} className="shrink-0 empty:hidden" />
       {/* Full-width timeline row */}
       <div className={focusMode ? "hidden" : "contents"}>
         <TimelinePane

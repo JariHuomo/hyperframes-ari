@@ -59,6 +59,52 @@ async function writeComposition(
 }
 
 describe("registerThumbnailRoutes", () => {
+  it("refuses evidence when the watcher signature lags the saved source", async () => {
+    const adapter = createAdapter();
+    await writeComposition(adapter, 1080, 1920);
+    adapter.getProjectSignature = () => "stale";
+    const app = new Hono();
+    registerThumbnailRoutes(app, adapter);
+    const response = await app.request(
+      "http://localhost/projects/demo/thumbnail/index.html?evidence=1",
+    );
+    expect(response.status).toBe(409);
+    expect(adapter.generateThumbnail).not.toHaveBeenCalled();
+  });
+
+  it("returns a revision and refuses reusing its URL after the source changes", async () => {
+    const adapter = createAdapter();
+    await writeComposition(adapter, 1080, 1920);
+    const app = new Hono();
+    registerThumbnailRoutes(app, adapter);
+    const response = await app.request(
+      "http://localhost/projects/demo/thumbnail/index.html?evidence=1",
+    );
+    expect(response.status).toBe(200);
+    const revision = response.headers.get("X-Hyperframes-Source-Revision");
+    expect(revision).toBeTruthy();
+    await writeComposition(adapter, 1920, 1080);
+    const stale = await app.request(
+      `http://localhost/projects/demo/thumbnail/index.html?evidence=1&revision=${revision}`,
+    );
+    expect(stale.status).toBe(409);
+  });
+
+  it("withholds pixels if the source changes while the renderer runs", async () => {
+    const adapter = createAdapter();
+    await writeComposition(adapter, 1080, 1920);
+    adapter.generateThumbnail = vi.fn(async () => {
+      await writeComposition(adapter, 1920, 1080);
+      return Buffer.from("ambiguous");
+    });
+    const app = new Hono();
+    registerThumbnailRoutes(app, adapter);
+    const response = await app.request(
+      "http://localhost/projects/demo/thumbnail/index.html?evidence=1",
+    );
+    expect(response.status).toBe(409);
+    expect(await response.text()).not.toContain("ambiguous");
+  });
   it("forwards selector queries to thumbnail generation", async () => {
     const adapter = createAdapter();
     const app = new Hono();

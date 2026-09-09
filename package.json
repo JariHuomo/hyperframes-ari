@@ -61,7 +61,9 @@
     "ari:studio": "node scripts/ari-studio.mjs",
     "ari:build": "HYPERFRAMES_NO_TELEMETRY=1 VITE_HYPERFRAMES_NO_TELEMETRY=1 bun run build",
     "ari:test": "bun run --cwd packages/studio test src/ari src/webmcp src/player/store/playerStore.test.ts src/components/TimelineToolbar.test.tsx",
-    "ari:test:browser": "node packages/studio/tests/e2e/ari-edit-loop.mjs"
+    "ari:test:browser": "node packages/studio/tests/e2e/ari-edit-loop.mjs",
+    "ari:test:motion": "node packages/studio/tests/e2e/ari-motion-sprint.mjs",
+    "ari:test:scenes": "node packages/studio/tests/e2e/ari-scenes-and-curves.mjs"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.5.0",

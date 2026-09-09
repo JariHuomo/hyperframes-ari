@@ -23,6 +23,7 @@ import {
 } from "@hyperframes/studio-server";
 import type { RegistryItem } from "@hyperframes/core/registry";
 import { createRetryingModuleLoader, ensureProducerDist } from "./vite.producer";
+import { createAriRenderSnapshot } from "./vite.ariRenderSnapshot";
 import { createStudioDevRenderBodyScripts } from "./vite.studioMotion";
 import { generateThumbnail, findSystemChrome } from "./vite.browser";
 
@@ -259,7 +260,7 @@ export function createViteAdapter(
 
     runtimeUrl: "/api/runtime.js",
 
-    rendersDir: () => resolve(dataDir, "../renders"),
+    rendersDir: (project) => resolve(dataDir, "../renders", project.id),
 
     startRender(opts): RenderJobState {
       const abortController = new AbortController();
@@ -271,6 +272,7 @@ export function createViteAdapter(
         cancel: () => abortController.abort(),
       };
 
+      const snapshot = createAriRenderSnapshot(opts.project.dir);
       const startTime = Date.now();
       const removeCancelledOutput = () => {
         // User-initiated cancel: not a failure. Remove any output so the
@@ -295,7 +297,7 @@ export function createViteAdapter(
             if (systemChrome) process.env.PRODUCER_HEADLESS_SHELL_PATH = systemChrome;
           }
           const { createRenderJob, executeRenderJob } = await getProducerModule();
-          const renderBodyScripts = createStudioDevRenderBodyScripts(opts.project.dir);
+          const renderBodyScripts = createStudioDevRenderBodyScripts(snapshot.dir);
           const job = createRenderJob({
             fps: opts.fps,
             quality: opts.quality as "draft" | "standard" | "high",
@@ -311,7 +313,7 @@ export function createViteAdapter(
           };
           await executeRenderJob(
             job,
-            opts.project.dir,
+            snapshot.dir,
             opts.outputPath,
             onProgress,
             abortController.signal,
@@ -327,7 +329,12 @@ export function createViteAdapter(
           const metaPath = opts.outputPath.replace(/\.(mp4|webm|mov)$/, ".meta.json");
           writeFileSync(
             metaPath,
-            JSON.stringify({ status: "complete", durationMs: Date.now() - startTime }),
+            JSON.stringify({
+              status: "complete",
+              durationMs: Date.now() - startTime,
+              sourceRevision: snapshot.revision,
+              sourceFiles: snapshot.files,
+            }),
           );
         } catch (err) {
           if (abortController.signal.aborted) {
@@ -342,6 +349,8 @@ export function createViteAdapter(
           } catch {
             /* ignore */
           }
+        } finally {
+          snapshot.dispose();
         }
       })();
 

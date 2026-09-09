@@ -21,6 +21,7 @@ import {
   resolveLiveHandleSelection,
 } from "../handles";
 import { toolFailure, toolOk, type ToolResult } from "../toolResult";
+import { easeCurveOf, type EaseCurve } from "../easeContract";
 import type { SelectionToolDeps } from "./selectionTools";
 
 export interface InspectToolDeps extends SelectionToolDeps {
@@ -40,6 +41,11 @@ interface InspectAnimation {
   position: number | string;
   duration: number | null;
   ease: string | null;
+  /** A keyframe animation's feel; null for a plain tween. */
+  easeEach: string | null;
+  /** The governing curve as numbers, so a script never has to read the DOM.
+   *  Null when the source ease is outside the closed contract. */
+  easeCurve: EaseCurve | null;
   properties: Record<string, number | string>;
   hasKeyframes: boolean;
   hasArcPath: boolean;
@@ -86,6 +92,7 @@ export interface StudioInspectInput {
 }
 
 function describeAnimation(animation: GsapAnimation): InspectAnimation {
+  const easeEach = animation.keyframes?.easeEach ?? null;
   return {
     animationId: animation.id,
     method: animation.method,
@@ -93,6 +100,8 @@ function describeAnimation(animation: GsapAnimation): InspectAnimation {
     position: animation.position,
     duration: animation.duration ?? null,
     ease: animation.ease ?? null,
+    easeEach,
+    easeCurve: easeCurveOf(easeEach ?? animation.ease),
     properties: animation.properties,
     hasKeyframes: animation.keyframes !== undefined,
     hasArcPath: animation.arcPath !== undefined,
@@ -244,5 +253,7 @@ export const STUDIO_INSPECT_DESCRIPTION = [
   "`can.reasonIfDisabled` says why one is not, so you can avoid a write that would be refused.",
   "Animations are only readable for the CURRENT selection; `animationEditingBlocked` says when",
   "and why animation editing is unavailable.",
+  "Each animation carries `easeCurve` — the governing curve's kind, label and numbers — and",
+  "`easeEach`, which is where a keyframe animation's feel is authored.",
   "Returns `ok: true`, or `ok: false` with `kind`, `reason` and a `hint`.",
 ].join(" ");

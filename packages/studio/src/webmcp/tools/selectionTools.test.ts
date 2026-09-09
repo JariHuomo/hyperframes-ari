@@ -7,6 +7,7 @@ import {
   type StudioSeekResult,
   type StudioSelectResult,
 } from "./selectionTools";
+import { sceneInstanceChoice } from "./animationScene";
 import {
   expectFailure,
   expectOk,
@@ -256,5 +257,191 @@ describe("studioSeek", () => {
       expect(result.kind).toBe("invalid");
     }
     expect(requestSeek).not.toHaveBeenCalled();
+  });
+});
+
+/** Sprint S2/S4: which placement of a shared scene, and which clock. */
+const TITLE_SCENE = "compositions/title-card.html";
+const PACK_SCENE = "compositions/pack-grid.html";
+
+const sceneClip = (overrides: Record<string, unknown>) => ({
+  id: "host",
+  label: "Otsikkokortti",
+  start: 0,
+  duration: 4,
+  kind: "composition",
+  compositionId: "scene",
+  parentCompositionId: null,
+  compositionSrc: TITLE_SCENE,
+  compositionAncestors: ["root"],
+  playbackStart: 0,
+  playbackRate: 1,
+  ...overrides,
+});
+
+const SCENE_MANIFEST = [
+  sceneClip({ id: "title-host-a", compositionId: "title-a", start: 0, duration: 4 }),
+  sceneClip({ id: "title-host-b", compositionId: "title-b", start: 4, duration: 4 }),
+  sceneClip({
+    id: "pack-host",
+    compositionId: "pack",
+    compositionSrc: PACK_SCENE,
+    start: 2,
+    duration: 5,
+  }),
+];
+
+function sceneSelectionDeps(
+  sourceFile: string,
+  overrides: Partial<SelectionToolDeps> = {},
+): { doc: Document; deps: SelectionToolDeps } {
+  const doc = previewDoc('<h1 id="headline" data-hf-id="abc">Ship it</h1>');
+  return {
+    doc,
+    deps: selectionDeps({
+      getPreviewDocument: () => doc,
+      getClipManifest: () => SCENE_MANIFEST,
+      getCompositionPath: () => "index.html",
+      buildSelection: async (element) => selectionFor(element, { sourceFile }),
+      ...overrides,
+    }),
+  };
+}
+
+describe("studioSelect · scene instances", () => {
+  it("lists every placement of a shared scene and chooses none of them", async () => {
+    sceneInstanceChoice.reset();
+    const { deps } = sceneSelectionDeps(TITLE_SCENE);
+
+    const ok = expectOk<StudioSelectResult>(await studioSelect(deps, "hf:abc"));
+
+    expect(ok.scene?.affectsInstances).toBe(2);
+    expect(ok.scene?.instance).toBeNull();
+    expect(ok.scene?.instances.map((instance) => instance.hostId)).toEqual([
+      "title-host-a",
+      "title-host-b",
+    ]);
+    expect(ok.scene?.instances[1]).toMatchObject({ masterStart: 4, masterEnd: 8 });
+  });
+
+  it("remembers an explicit instance and auto-selects a single placement", async () => {
+    sceneInstanceChoice.reset();
+    const shared = sceneSelectionDeps(TITLE_SCENE);
+
+    const chosen = expectOk<StudioSelectResult>(
+      await studioSelect(shared.deps, "hf:abc", "title-host-b"),
+    );
+    expect(chosen.scene?.instance).toBe("title-host-b");
+    expect(sceneInstanceChoice.forSource(TITLE_SCENE)).toBe("title-host-b");
+
+    const single = sceneSelectionDeps(PACK_SCENE);
+    const only = expectOk<StudioSelectResult>(await studioSelect(single.deps, "hf:abc"));
+    expect(only.scene?.instance).toBe("pack-host");
+    sceneInstanceChoice.reset();
+  });
+
+  it("refuses an instance that is not a placement of the selected scene", async () => {
+    sceneInstanceChoice.reset();
+    const { deps } = sceneSelectionDeps(TITLE_SCENE);
+    const applySelection = vi.fn();
+
+    const failure = expectFailure(
+      await studioSelect(
+        selectionDeps({
+          getPreviewDocument: () => deps.getPreviewDocument(),
+          getClipManifest: () => SCENE_MANIFEST,
+          getCompositionPath: () => "index.html",
+          buildSelection: async (element) => selectionFor(element, { sourceFile: TITLE_SCENE }),
+          applySelection,
+        }),
+        "hf:abc",
+        "pack-host",
+      ),
+    );
+
+    expect(failure.reason).toContain("ei ole esiintymää pack-host");
+    expect(applySelection).not.toHaveBeenCalled();
+  });
+
+  it("refuses an instance on a root-composition selection", async () => {
+    const doc = previewDoc('<h1 id="headline" data-hf-id="abc">Ship it</h1>');
+    const failure = expectFailure(
+      await studioSelect(
+        selectionDeps({ getPreviewDocument: () => doc, getClipManifest: () => SCENE_MANIFEST }),
+        "hf:abc",
+        "title-host-a",
+      ),
+    );
+
+    expect(failure.reason).toBe("instance koskee vain sisäkkäistä kohtausta");
+  });
+});
+
+describe("studioSeek · both time bases", () => {
+  const seekDeps = (currentTimeRef: { value: number }) =>
+    selectionDeps({
+      getClipManifest: () => SCENE_MANIFEST,
+      getCompositionPath: () => "index.html",
+      requestSeek: (time) => {
+        // The player rounds to a frame in MASTER time, which is exactly why the
+        // receipt reports both clocks instead of echoing the request.
+        currentTimeRef.value = Math.round(time * 30) / 30;
+      },
+      readPlayhead: () => ({ currentTime: currentTimeRef.value, duration: 10, isPlaying: false }),
+    });
+
+  it("moves master time to 5 s for scene time 1 s in the second placement", () => {
+    const currentTime = { value: 0 };
+
+    const ok = expectOk<StudioSeekResult>(
+      studioSeek(seekDeps(currentTime), {
+        time: 1,
+        timeBasis: "scene",
+        instance: "title-host-b",
+      }),
+    );
+
+    expect(ok.playhead).toBe(5);
+    expect(ok.scene).toEqual({
+      sourceFile: TITLE_SCENE,
+      instance: "title-host-b",
+      localPosition: 1,
+      masterPosition: 5,
+    });
+  });
+
+  it("shows the frame-rounded difference between the two clocks", () => {
+    const currentTime = { value: 0 };
+
+    const ok = expectOk<StudioSeekResult>(
+      studioSeek(seekDeps(currentTime), {
+        time: 1.01,
+        timeBasis: "scene",
+        instance: "title-host-b",
+      }),
+    );
+
+    // 5.01 s master rounds to the nearest 30 fps frame; the scene clock follows.
+    expect(ok.scene?.masterPosition).toBe(5);
+    expect(ok.scene?.localPosition).toBe(1);
+  });
+
+  it("refuses scene time without an instance, and an unknown instance", () => {
+    const currentTime = { value: 0 };
+    expect(
+      expectFailure(studioSeek(seekDeps(currentTime), { time: 1, timeBasis: "scene" })).reason,
+    ).toBe("timeBasis scene vaatii instance-kentän");
+    expect(
+      expectFailure(
+        studioSeek(seekDeps(currentTime), { time: 1, timeBasis: "scene", instance: "nope" }),
+      ).reason,
+    ).toContain("esiintymää nope ei löydy");
+  });
+
+  it("still accepts a bare master time as a number", () => {
+    const currentTime = { value: 0 };
+    const ok = expectOk<StudioSeekResult>(studioSeek(seekDeps(currentTime), 2));
+    expect(ok.playhead).toBe(2);
+    expect(ok.scene).toBeUndefined();
   });
 });

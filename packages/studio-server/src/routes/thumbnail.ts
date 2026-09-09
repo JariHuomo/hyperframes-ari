@@ -89,6 +89,22 @@ export function registerThumbnailRoutes(api: Hono, adapter: StudioApiAdapter): v
     if (compPath && !compPath.includes(".")) compPath += ".html";
 
     const url = new URL(c.req.url, `http://${c.req.header("host") || "localhost"}`);
+    // Ari: evidence requests must agree with disk AND the preview cache. A
+    // delayed watcher is an explicit conflict, never a successful stale image.
+    const evidence = url.searchParams.get("evidence") === "1";
+    const expectedRevision = url.searchParams.get("revision");
+    if (
+      evidence &&
+      (createProjectSignature(project.dir) !== projectSignature ||
+        (expectedRevision !== null && expectedRevision !== projectSignature))
+    ) {
+      return c.json({ error: "Source revision changed; capture a new frame." }, 409);
+    }
+    const headers = {
+      "Content-Type": "",
+      "Cache-Control": "no-cache",
+      ...(evidence ? { "X-Hyperframes-Source-Revision": projectSignature } : {}),
+    };
     const rawSeekTime = url.searchParams.get("t");
     const parsedSeekTime = rawSeekTime == null ? Number.NaN : parseFloat(rawSeekTime);
     const seekTime = Number.isFinite(parsedSeekTime) ? parsedSeekTime : 0.5;
@@ -188,7 +204,7 @@ export function registerThumbnailRoutes(api: Hono, adapter: StudioApiAdapter): v
     }
     if (existsSync(cachePath)) {
       return new Response(new Uint8Array(readFileSync(cachePath)), {
-        headers: { "Content-Type": contentType, "Cache-Control": "no-cache" },
+        headers: { ...headers, "Content-Type": contentType },
       });
     }
 
@@ -220,6 +236,7 @@ export function registerThumbnailRoutes(api: Hono, adapter: StudioApiAdapter): v
             afterGeneration.signature !== projectSignature ||
             freshSignature !== projectSignature
           ) {
+            if (evidence) throw new Error("ARI_FRAME_REVISION_CHANGED");
             // The browser may have rendered content written after this request
             // captured its cache identity. Return the pixels to this caller,
             // but never file them under a signature they do not prove.
@@ -236,15 +253,19 @@ export function registerThumbnailRoutes(api: Hono, adapter: StudioApiAdapter): v
           500,
         );
       }
+      if (evidence && createProjectSignature(project.dir) !== projectSignature)
+        return c.json({ error: "Source changed during capture; capture a new frame." }, 409);
       pruneThumbnailCache(cacheDir, thumbnailGenerationCoordinator.protectedKeys());
       return new Response(new Uint8Array(buffer), {
-        headers: { "Content-Type": contentType, "Cache-Control": "no-cache" },
+        headers: { ...headers, "Content-Type": contentType },
       });
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         return new Response(null, { status: 499 });
       }
       const msg = err instanceof Error ? err.message : String(err);
+      if (msg === "ARI_FRAME_REVISION_CHANGED")
+        return c.json({ error: "Source changed during capture; capture a new frame." }, 409);
       return c.json({ error: `Thumbnail generation failed: ${msg}` }, 500);
     }
   });

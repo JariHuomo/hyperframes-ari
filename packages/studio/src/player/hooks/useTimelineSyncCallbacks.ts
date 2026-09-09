@@ -29,6 +29,7 @@ import {
   withImplicitDomLayers,
   type RuntimeTimelineMessage,
 } from "./timelineSyncHydration";
+import { withCompositionSourceFiles } from "../lib/compositionSourceFile";
 
 // Re-exported for the tests and callers that have always imported it from here.
 export { resolveReloadSeekTime } from "./timelineSyncHydration";
@@ -118,14 +119,18 @@ export function useTimelineSyncCallbacks({
         return;
       }
 
-      usePlayerStore.getState().setClipManifest(data.clips);
+      const iframeDoc = safeContentDocument(iframeRef.current);
+      // The inliner renames data-composition-src to data-composition-file, so
+      // the runtime cannot report a scene's source path any more. Put it back
+      // before anything downstream resolves a scene BY file — see
+      // `lib/compositionSourceFile.ts` for what that silently disabled.
+      usePlayerStore.getState().setClipManifest(withCompositionSourceFiles(data.clips, iframeDoc));
 
       // Show root-level clips: no parentCompositionId, OR parent is a "phantom wrapper"
       const clipCompositionIds = new Set(data.clips.map((c) => c.compositionId).filter(Boolean));
       const filtered = data.clips.filter(
         (clip) => !clip.parentCompositionId || !clipCompositionIds.has(clip.parentCompositionId),
       );
-      const iframeDoc = safeContentDocument(iframeRef.current);
 
       try {
         const parentMap = clipTreeParentMap(iframeRef.current?.contentWindow ?? null);

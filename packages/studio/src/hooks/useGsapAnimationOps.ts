@@ -1,6 +1,8 @@
+import { motionPresetProperties, type StudioMotionOptions } from "../utils/studioMotionPreset";
 import { useCallback } from "react";
 import type { Composition } from "@hyperframes/sdk";
 import type { DomEditSelection } from "../components/editor/domEditingTypes";
+import { masterToLocal, resolveSceneInstances, type SceneTimeManifestClip } from "../ari/sceneTime";
 import { roundTo3 } from "../utils/rounding";
 import {
   sdkGsapTweenPersist,
@@ -24,6 +26,8 @@ interface SdkAnimationDeps {
 interface GsapAnimationOpsParams extends SdkAnimationDeps {
   projectIdRef: React.MutableRefObject<string | null>;
   activeCompPath: string | null;
+  /** The player's clip manifest, which is what resolves a scene's placements. */
+  getClipManifest?: () => readonly SceneTimeManifestClip[] | null;
   commitMutation: CommitMutation;
   commitMutationSafely: SafeGsapCommitMutation;
   showToast: (message: string, tone?: "error" | "info") => void;
@@ -32,6 +36,7 @@ interface GsapAnimationOpsParams extends SdkAnimationDeps {
 export function useGsapAnimationOps({
   projectIdRef,
   activeCompPath,
+  getClipManifest,
   commitMutation,
   commitMutationSafely,
   showToast,
@@ -51,14 +56,14 @@ export function useGsapAnimationOps({
           { kind: "set", animationId, properties: updates },
           sdkSession,
           sdkDeps,
-          { label: "Edit GSAP animation", coalesceKey: `gsap:${animationId}:meta` },
+          { label: "Edit GSAP animation" },
         );
         if (cutoverCommittedOrThrow(handled)) return;
       }
       return commitMutationSafely(
         selection,
         { type: "update-meta", animationId, updates },
-        { label: "Edit GSAP animation", coalesceKey: `gsap:${animationId}:meta`, softReload: true },
+        { label: "Edit GSAP animation", softReload: true },
       );
     },
     [commitMutationSafely, activeCompPath, sdkSession, sdkDeps],
@@ -114,14 +119,48 @@ export function useGsapAnimationOps({
     async (
       selection: DomEditSelection,
       method: "to" | "from" | "set" | "fromTo",
-      _currentTime?: number,
+      currentTime?: number,
+      options?: StudioMotionOptions,
+      instance?: string | null,
     ) => {
+      // Ari: a master playhead is not a sub-composition's local clock. The
+      // refusal survives (sprint S4) for exactly the ambiguous case: no
+      // resolvable placement, or several with none chosen. When the instance IS
+      // unambiguous the master time is converted here with the same formula the
+      // runtime seeks with, instead of being written as if it were local.
+      let localTime = currentTime;
+      if (
+        currentTime !== undefined &&
+        selection.sourceFile &&
+        selection.sourceFile !== (activeCompPath || "index.html")
+      ) {
+        const { instances } = resolveSceneInstances(
+          { clips: getClipManifest?.() ?? [] },
+          selection.sourceFile,
+        );
+        const chosen = instance
+          ? instances.find((candidate) => candidate.hostId === instance)
+          : instances.length === 1
+            ? instances[0]
+            : undefined;
+        if (chosen) {
+          localTime = masterToLocal(chosen, currentTime);
+        } else if (options?.position === undefined) {
+          // Nothing resolves the placement AND nothing carries an already-local
+          // start: writing the master playhead here would put the tween at the
+          // wrong second in the scene's own clock.
+          throw new Error("Avaa kohtaus omalle aikajanalleen ennen liikkeen lisäämistä.");
+        }
+      }
+      if (localTime !== undefined && (!Number.isFinite(localTime) || localTime < 0)) {
+        throw new Error("Liikkeen aloitusaika ei kelpaa.");
+      }
       const { selector, autoId } = ensureElementAddressable(selection);
 
       if (autoId) {
         const pid = projectIdRef.current;
         const targetPath = selection.sourceFile || activeCompPath || "index.html";
-        if (!pid) return;
+        if (!pid) throw new Error("Projektia ei ole avattu.");
         const assigned = await assignGsapTargetAutoIdIfNeeded({
           projectId: pid,
           targetPath,
@@ -129,15 +168,17 @@ export function useGsapAnimationOps({
           autoId,
           showToast,
         });
-        if (!assigned) return;
+        if (!assigned) throw new Error("Kohteen tunnistetta ei voitu tallentaa.");
       }
 
       const elStart = Number.parseFloat(selection.dataAttributes?.start ?? "0") || 0;
       const elDuration = Number.parseFloat(selection.dataAttributes?.duration ?? "1") || 1;
-      const position = roundTo3(elStart);
-      const duration = roundTo3(elDuration);
+      const position = roundTo3(options?.position ?? localTime ?? elStart);
+      const duration = roundTo3(
+        options?.duration ?? (localTime === undefined ? elDuration : Math.min(1, elDuration)),
+      );
       const toDefaults: Record<string, Record<string, number>> = {
-        from: { opacity: 0 },
+        from: motionPresetProperties(options?.preset),
         to: { x: 0, y: 0, opacity: 1 },
         set: { opacity: 1 },
         fromTo: { x: 0, y: 0, opacity: 1 },
@@ -152,7 +193,7 @@ export function useGsapAnimationOps({
         const spec = {
           method,
           position,
-          ...(method !== "set" ? { duration, ease: "power2.out" as const } : {}),
+          ...(method !== "set" ? { duration, ease: options?.ease ?? "power2.out" } : {}),
           properties: toDefaults[method] ?? { opacity: 1 },
           ...(method === "fromTo" ? { fromProperties: { opacity: 0 } } : {}),
         };
@@ -174,14 +215,14 @@ export function useGsapAnimationOps({
           method,
           position,
           duration: method === "set" ? undefined : duration,
-          ease: method === "set" ? undefined : "power2.out",
+          ease: method === "set" ? undefined : (options?.ease ?? "power2.out"),
           properties: toDefaults[method] ?? { opacity: 1 },
           fromProperties: method === "fromTo" ? { opacity: 0 } : undefined,
         },
         { label: `Add GSAP ${method} animation`, softReload: true },
       );
     },
-    [activeCompPath, commitMutation, projectIdRef, showToast, sdkSession, sdkDeps],
+    [activeCompPath, commitMutation, getClipManifest, projectIdRef, showToast, sdkSession, sdkDeps],
   );
 
   type KeyframeEntry = {

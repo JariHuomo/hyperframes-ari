@@ -25,6 +25,8 @@ export function buildFrameCaptureUrl({
   url.searchParams.set("t", Math.max(0, currentTime).toFixed(3));
   url.searchParams.set("format", "png");
   url.searchParams.set("output", "source");
+  // Ari: request fail-closed revision evidence, not a best-effort thumbnail.
+  url.searchParams.set("evidence", "1");
   url.searchParams.set("v", String(Date.now()));
   return url.toString();
 }

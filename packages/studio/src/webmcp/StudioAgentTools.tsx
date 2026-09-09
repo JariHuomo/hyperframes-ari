@@ -1,4 +1,6 @@
 // Modified for Ari Studio; changes documented in /ARI.md.
+import { withGeometryReadback } from "./geometryReadback";
+import { readAnimationSource } from "./tools/animationReadback";
 import { AriControlPanel } from "../ari/AriControlPanel";
 import { useCallback, useEffect, useMemo } from "react";
 import { useDomEditActionsContext, useDomEditSelectionContext } from "../contexts/DomEditContext";
@@ -61,9 +63,15 @@ export function resizeSelectionFromAgent(
 export function StudioAgentTools({
   focusMode,
   onToggleFocus,
+  commandPanelHost,
+  layersHost,
+  timelineHost,
 }: {
   focusMode: boolean;
   onToggleFocus: () => void;
+  commandPanelHost?: HTMLElement | null;
+  layersHost?: HTMLElement | null;
+  timelineHost?: HTMLElement | null;
 }) {
   const { projectId, activeCompPath, editHistory, writeBlockedReason } = useStudioShellContext();
   const {
@@ -86,7 +94,6 @@ export function StudioAgentTools({
     handleGsapUpdateMeta,
     handleGsapAddKeyframeBatch,
     handleGsapDeleteAnimation,
-    getGsapAnimationsForSelection,
   } = useDomEditActionsContext();
 
   useEffect(() => {
@@ -99,6 +106,7 @@ export function StudioAgentTools({
     return {
       projectId,
       compositionPath: activeCompPath,
+      clipManifest: player.clipManifest,
       currentTime: player.currentTime,
       duration: player.duration,
       isPlaying: player.isPlaying,
@@ -144,13 +152,21 @@ export function StudioAgentTools({
       },
       getProjectId: () => projectId,
       getCompositionPath: () => activeCompPath,
+      // Scene placements are read live: the manifest is republished whenever the
+      // preview reloads, and a stale copy would address the wrong instance.
+      getClipManifest: () => usePlayerStore.getState().clipManifest,
       // HEAD, not GET: the tool only needs to know the frame renders. Pulling
       // the PNG here would download it once for nothing, since the agent
       // fetches the URL itself.
       probeFrame: async (url) => {
         try {
           const response = await fetch(url, { method: "HEAD" });
-          return { ok: response.ok, status: response.status };
+          const sourceRevision = response.headers.get("X-Hyperframes-Source-Revision");
+          return {
+            ok: response.ok && Boolean(sourceRevision),
+            status: response.status,
+            ...(sourceRevision ? { sourceRevision } : {}),
+          };
         } catch {
           return { ok: false, status: 0 };
         }
@@ -168,11 +184,19 @@ export function StudioAgentTools({
       // source-safe selection instead of measuring its detached old node.
       readBox: (selection) =>
         readLiveSelectionBox(previewIframeRef.current?.contentDocument, selection, activeCompPath),
-      moveTo: (selection, next) => handleDomPathOffsetCommit(selection, next),
+      moveTo: (selection, next) =>
+        withGeometryReadback(projectId, selection, () =>
+          handleDomPathOffsetCommit(selection, next),
+        ),
       resizeTo: (selection, next) =>
-        resizeSelectionFromAgent(selection, next, handleDomBoxSizeCommit),
-      rotateTo: (selection, next) => handleDomRotationCommit(selection, next),
-      addAnimation: (selection, method) => handleGsapAddAnimation(method, selection),
+        withGeometryReadback(projectId, selection, () =>
+          resizeSelectionFromAgent(selection, next, handleDomBoxSizeCommit),
+        ),
+      rotateTo: (selection, next) =>
+        withGeometryReadback(projectId, selection, () => handleDomRotationCommit(selection, next)),
+      readAnimationSource: (selection) => readAnimationSource(projectId, selection),
+      addAnimation: (selection, method, options, instance) =>
+        handleGsapAddAnimation(method, selection, options, instance),
       updateAnimation: (selection, animationId, updates) =>
         handleGsapUpdateMeta(animationId, updates, selection),
       addKeyframe: (selection, animationId, percent, properties) =>
@@ -180,7 +204,7 @@ export function StudioAgentTools({
       deleteAnimation: (selection, animationId) =>
         handleGsapDeleteAnimation(animationId, selection),
       getAnimationsForSelection: async (selection) =>
-        await getGsapAnimationsForSelection(selection),
+        (await readAnimationSource(projectId, selection)).animations,
       getGsapDiagnostics: () => ({
         animations: selectedGsapAnimations,
         multipleTimelines: gsapMultipleTimelines,
@@ -204,7 +228,6 @@ export function StudioAgentTools({
       handleGsapUpdateMeta,
       handleGsapAddKeyframeBatch,
       handleGsapDeleteAnimation,
-      getGsapAnimationsForSelection,
       domEditSelection,
       selectedGsapAnimations,
       gsapMultipleTimelines,
@@ -219,6 +242,9 @@ export function StudioAgentTools({
       getSnapshot={getSnapshot}
       focusMode={focusMode}
       onToggleFocus={onToggleFocus}
+      commandPanelHost={commandPanelHost}
+      layersHost={layersHost}
+      timelineHost={timelineHost}
     />
   );
 }

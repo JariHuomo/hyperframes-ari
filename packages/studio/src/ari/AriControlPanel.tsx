@@ -1,10 +1,16 @@
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { usePlayerStore } from "../player";
 import { useStudioShellContext, useStudioPlaybackContext } from "../contexts/StudioContext";
 import { useDomEditSelectionContext } from "../contexts/DomEditContext";
 import { studioEditLifecycle } from "../webmcp/writeCoordinator";
 import { type StudioLookSnapshot } from "../webmcp/tools/lookTools";
 import type { AriAgentBridge, AriCallReceipt } from "./agentBridge";
+import { ariNumber } from "./AriNumber";
+import { useAriTime } from "./useAriTime";
+import { AriTimeline } from "./AriTimeline";
+import { AriLayers } from "./AriLayers";
+import { buildStudioLook } from "../webmcp/tools/lookTools";
 import { AriCommandPanel } from "./AriCommandPanel";
 import { ariButton as button } from "./styles";
 
@@ -13,7 +19,8 @@ const emptySnapshot = () => null;
 
 function receiptText(result: unknown): string {
   if (typeof result !== "object" || result === null) return "Toiminto päättyi";
-  if (Reflect.get(result, "ok") === false) return "Toiminto ei onnistunut — katso tiedot";
+  if (Reflect.get(result, "ok") === false)
+    return `Toiminto ei onnistunut: ${String(Reflect.get(result, "reason") ?? "katso tiedot")}`;
   if (Reflect.get(result, "partial") === true) return "Vain osa muutoksista onnistui";
   switch (Reflect.get(result, "stage")) {
     case "verified":
@@ -32,14 +39,24 @@ export function AriControlPanel({
   getSnapshot,
   focusMode,
   onToggleFocus,
+  commandPanelHost,
+  layersHost,
+  timelineHost,
 }: {
   bridge: AriAgentBridge | null;
   focusMode: boolean;
   onToggleFocus: () => void;
+  commandPanelHost?: HTMLElement | null;
+  layersHost?: HTMLElement | null;
+  timelineHost?: HTMLElement | null;
   getSnapshot: () => StudioLookSnapshot;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const [time, setTime] = useState("0");
+  const pausedTime = usePlayerStore((state) => (state.isPlaying ? null : state.currentTime));
+  useEffect(() => {
+    if (pausedTime !== null) setTime(String(Math.round(pausedTime * 1000) / 1000));
+  }, [pausedTime]);
   const { writeBlockedReason, editHistory, handleUndo, handleRedo } = useStudioShellContext();
   const keyframes = usePlayerStore((state) => state.autoKeyframeEnabled);
   const call = useSyncExternalStore(
@@ -47,6 +64,7 @@ export function AriControlPanel({
     bridge?.getSnapshot ?? emptySnapshot,
   );
   const busy = call?.state === "running";
+  const look = buildStudioLook(getSnapshot());
   async function run(name: string, args: unknown = {}) {
     await bridge?.call(name, args);
   }
@@ -67,7 +85,11 @@ export function AriControlPanel({
         >
           Ari-ohjaamo {expanded ? "▴" : "▾"}
         </button>
-        <button className={button} aria-pressed={focusMode} onClick={onToggleFocus}>
+        <button
+          className={`${button} w-48 shrink-0`}
+          aria-pressed={focusMode}
+          onClick={onToggleFocus}
+        >
           {focusMode ? "Näytä työkalupaneelit" : "Kuva isoksi"}
         </button>
         <AriSelection />
@@ -76,7 +98,8 @@ export function AriControlPanel({
           <input
             aria-label="Aika sekunteina"
             className="w-20 rounded border border-neutral-500 bg-neutral-900 p-2"
-            type="number"
+            type="text"
+            inputMode="decimal"
             min="0"
             step="0.1"
             value={time}
@@ -85,8 +108,8 @@ export function AriControlPanel({
         </label>
         <button
           className={button}
-          disabled={!bridge || busy || time.trim() === ""}
-          onClick={() => void run("studio_seek", { time: Number(time) })}
+          disabled={!bridge || busy || !Number.isFinite(ariNumber(time))}
+          onClick={() => void run("studio_seek", { time: ariNumber(time) })}
         >
           Siirry
         </button>
@@ -123,15 +146,37 @@ export function AriControlPanel({
         </button>
       </div>
       <AriStatus bridge={bridge} call={call} />
-      {expanded && bridge && (
-        <AriCommandPanel bridge={bridge} getSnapshot={getSnapshot} time={time} call={call} />
-      )}
+      {bridge &&
+        focusMode &&
+        layersHost &&
+        createPortal(
+          <AriLayers bridge={bridge} getSnapshot={getSnapshot} busy={busy} />,
+          layersHost,
+        )}
+      {bridge &&
+        focusMode &&
+        timelineHost &&
+        createPortal(
+          <AriTimeline
+            bridge={bridge}
+            handle={look.ok ? look.selection?.handle : null}
+            busy={busy}
+          />,
+          timelineHost,
+        )}
+      {expanded &&
+        bridge &&
+        commandPanelHost &&
+        createPortal(
+          <AriCommandPanel bridge={bridge} getSnapshot={getSnapshot} time={time} call={call} />,
+          commandPanelHost,
+        )}
     </section>
   );
 }
 
 function AriPlayhead() {
-  const time = usePlayerStore((state) => state.currentTime);
+  const time = useAriTime();
   const duration = usePlayerStore((state) => state.duration);
   return (
     <span data-testid="ari-playhead">
@@ -179,17 +224,13 @@ function AriStatus({
 
 function AriSelection() {
   const { domEditSelection } = useDomEditSelectionContext();
-  const selectedId = usePlayerStore((state) => state.selectedElementId);
-  const timelineLabel = usePlayerStore(
-    (state) => state.elements.find((e) => e.id === selectedId)?.label,
-  );
   return (
-    <div className="min-w-36 max-w-72 text-sm">
-      <span className="text-neutral-400">Kuvavalinta </span>
+    <div className="w-52 shrink-0 truncate text-sm">
+      <span className="text-neutral-400">Valittu kohde </span>
       <strong data-testid="ari-target">{domEditSelection?.label ?? "Ei valintaa"}</strong>
       <br />
       <span className="text-xs text-neutral-300">
-        Aikajanan kohde: {timelineLabel ?? "Ei valintaa"}
+        {domEditSelection?.sourceFile ?? "Valitse taso tai kohde kuvasta"}
       </span>
     </div>
   );

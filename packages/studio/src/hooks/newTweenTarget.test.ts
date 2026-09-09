@@ -119,6 +119,19 @@ describe("ensureElementAddressable — add-animation button", () => {
     expect(ensureElementAddressable(selectionFor(el)).selector).toBe(".header");
   });
 
+  /** Ari: a scene file may be hosted several times, so the minted id ends up in
+   * source a person reads. Its own studio address beats a bare tag name. */
+  it("mints the element's data-hf-id rather than a bare tag name", () => {
+    document.body.innerHTML = `<div id="scene"><div data-hf-id="headline-card-offer"></div></div>`;
+    const el = document.querySelector<HTMLElement>("[data-hf-id]")!;
+    const selection = { ...selectionFor(el), selector: undefined } as DomEditSelection;
+
+    const { selector, autoId } = ensureElementAddressable(selection);
+
+    expect(autoId).toBe("headline-card-offer");
+    expect(selector).toBe("#headline-card-offer");
+  });
+
   it("still mints an id when there is no live element to disambiguate against", () => {
     document.body.innerHTML = `<div id="scene"><div></div></div>`;
     const el = document.querySelector<HTMLElement>("#scene > div")!;

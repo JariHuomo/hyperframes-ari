@@ -109,7 +109,75 @@ describe("studioInspect", () => {
     expect(ok.animations).toHaveLength(1);
     expect(ok.animations[0]?.animationId).toBe("anim-1");
     expect(ok.animations[0]?.ease).toBe("power2.out");
+    expect(ok.animations[0]?.easeEach).toBeNull();
+    expect(ok.animations[0]?.easeCurve).toMatchObject({
+      kind: "named",
+      ease: "power2.out",
+      label: "Pehmeä",
+    });
+    expect(ok.animations[0]?.easeCurve?.points).toHaveLength(4);
     expect(ok.animationEditingBlocked).toBeNull();
+  });
+
+  it("returns the curve's numbers, so a script never has to read the DOM", async () => {
+    const element = previewElement('<h1 id="headline">Ship it</h1>', "headline");
+
+    const result = await studioInspect(
+      inspectDeps({
+        getCurrentSelection: () => selectionFor(element),
+        getGsapDiagnostics: () => ({
+          animations: [animation({ ease: "custom(M0,0 C0.34,1.56 0.64,1 1,1)" })],
+          multipleTimelines: false,
+          unsupportedTimelinePattern: false,
+        }),
+      }),
+    );
+
+    expect(expectOk<StudioInspectResult>(result).animations[0]?.easeCurve).toMatchObject({
+      kind: "custom",
+      points: [0.34, 1.56, 0.64, 1],
+    });
+  });
+
+  it("reports a keyframe animation's feel from easeEach, which is where it renders from", async () => {
+    const element = previewElement('<h1 id="headline">Ship it</h1>', "headline");
+
+    const result = await studioInspect(
+      inspectDeps({
+        getCurrentSelection: () => selectionFor(element),
+        getGsapDiagnostics: () => ({
+          animations: [
+            animation({
+              ease: "power2.out",
+              keyframes: { format: "percentage", keyframes: [], easeEach: "power3.out" },
+            }),
+          ],
+          multipleTimelines: false,
+          unsupportedTimelinePattern: false,
+        }),
+      }),
+    );
+
+    const ok = expectOk<StudioInspectResult>(result);
+    expect(ok.animations[0]?.easeEach).toBe("power3.out");
+    expect(ok.animations[0]?.easeCurve).toMatchObject({ ease: "power3.out" });
+  });
+
+  it("reports no curve for an ease outside the closed contract", async () => {
+    const element = previewElement('<h1 id="headline">Ship it</h1>', "headline");
+
+    const result = await studioInspect(
+      inspectDeps({
+        getCurrentSelection: () => selectionFor(element),
+        getGsapDiagnostics: () => ({
+          animations: [animation({ ease: "power2.uot" })],
+          multipleTimelines: false,
+          unsupportedTimelinePattern: false,
+        }),
+      }),
+    );
+
+    expect(expectOk<StudioInspectResult>(result).animations[0]?.easeCurve).toBeNull();
   });
 
   it("says WHY animation editing is unavailable, so a write is not attempted", async () => {

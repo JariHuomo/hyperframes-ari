@@ -103,8 +103,34 @@ try {
   assert(readFileSync(source, "utf8").includes("Valitse oma tyyli"));
   assert.equal(readFileSync(join(temp, "compositions/right-card.html"), "utf8"), siblingBefore);
   report.checks.push("script text write persisted; duplicate id in sibling untouched");
-  await page.locator("button::-p-text(Ari-ohjaamo)").click();
-  await page.select('section[aria-label="Ari-ohjaamo"] select', "studio_set_style");
+  const previewHeight = await page.$eval(
+    '[aria-label="Composition preview"]',
+    (el) => el.getBoundingClientRect().height,
+  );
+  if (
+    (await page.$eval('[data-testid="ari-control-panel"] button', (el) =>
+      el.getAttribute("aria-expanded"),
+    )) !== "true"
+  )
+    await page.locator("button::-p-text(Ari-ohjaamo)").click();
+  await page.locator('[aria-label="Mainosteksti"]').fill("Valitse oma tyyli.");
+  await page.locator("button::-p-text(Tallenna teksti)").click();
+  await page.waitForFunction(
+    () =>
+      window.ariStudio.getSnapshot()?.state === "done" &&
+      window.ariStudio.getSnapshot()?.tool === "studio_set_text",
+  );
+  assert(readFileSync(source, "utf8").includes("Valitse oma tyyli."));
+  const dockedPreviewHeight = await page.$eval(
+    '[aria-label="Composition preview"]',
+    (el) => el.getBoundingClientRect().height,
+  );
+  assert(Math.abs(previewHeight - dockedPreviewHeight) < 3, "Ari dock must preserve canvas height");
+  report.checks.push(
+    "plain text field saves through the bridge; side dock preserves preview height",
+  );
+  await page.locator("summary::-p-text(Skriptikomennot)").click();
+  await page.select('[aria-label="Skriptitoiminto"]', "studio_set_style");
   await page.waitForFunction(() =>
     document.querySelector('[aria-label="Komennon tiedot"]').value.includes("#ffffff"),
   );
@@ -141,6 +167,8 @@ try {
   );
   const frame = await page.evaluate(() => window.ariStudio.getSnapshot().result);
   assert(frame.ok, JSON.stringify(frame));
+  assert(frame.sourceRevision);
+  assert.equal(new URL(frame.url).searchParams.get("revision"), frame.sourceRevision);
   const bytes = Buffer.from(await (await fetch(frame.url)).arrayBuffer());
   assert.equal(bytes.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
   writeFileSync(join(evidence, "source-frame.png"), bytes);
@@ -150,7 +178,12 @@ try {
     "click rendered a PNG from saved source; result image visible in control panel",
   );
   report.frameSha256 = sha(bytes);
-  await page.locator("button::-p-text(Ari-ohjaamo)").click();
+  if (
+    (await page.$eval('[data-testid="ari-control-panel"] button', (el) =>
+      el.getAttribute("aria-expanded"),
+    )) !== "true"
+  )
+    await page.locator("button::-p-text(Ari-ohjaamo)").click();
   // Closing the panel changes the canvas scale. Wait for the overlay RAF to
   // follow the new geometry before judging or clicking its visible handles.
   let stableGeometryCount = 0;
@@ -195,7 +228,7 @@ try {
   await page.reload({ waitUntil: "domcontentloaded" });
   await lookReady();
   const inspect = await call("studio_inspect", { handle: target.handle });
-  assert.equal(inspect.text, "Valitse oma tyyli");
+  assert.equal(inspect.text, "Valitse oma tyyli.");
   assert.equal(
     await page
       .locator("button::-p-text(Liikkeen tallennus: pois)")

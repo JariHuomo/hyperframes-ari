@@ -29,12 +29,18 @@ export function ensureElementAddressable(selection: DomEditSelection): {
     return { selector: selection.selector };
   }
 
+  // Ari: inside a sub-composition the minted id ends up in a scene source that
+  // may be hosted several times, so `div` reads as nothing at all in the file the
+  // customer opens. The element's own studio address is stable, unique per source
+  // file and already the name every tool and receipt uses — prefer it, and fall
+  // back to the tag when there is none.
   const tag = el.tagName.toLowerCase();
-  let id = tag;
+  const base = el.getAttribute("data-hf-id")?.trim() || tag;
+  let id = base;
   let n = 1;
   while (doc.getElementById(id)) {
     n += 1;
-    id = `${tag}-${n}`;
+    id = `${base}-${n}`;
   }
   el.setAttribute("id", id);
   return { selector: idSelector(id), autoId: id };

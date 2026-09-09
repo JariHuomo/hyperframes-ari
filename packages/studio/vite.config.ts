@@ -261,7 +261,7 @@ export default defineConfig({
       // it is not Studio's to make: the app already decides whether a write of
       // its own needs the preview refreshed, and the plugin below announces
       // project writes as `hf:file-change` off its own watcher.
-      ignored: ["**/data/projects/**"],
+      ignored: ["**/data/projects/**", "**/data/renders/**"],
     },
   },
   ssr: {

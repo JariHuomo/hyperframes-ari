@@ -1,17 +1,19 @@
-/**
- * `studio_animate`: author motion.
- *
- * Add, update, and delete await the shared GSAP commit pipeline. Its promise is
- * the single settlement boundary for persistence and live-preview sync, so a
- * successful tool response never races ahead of the pixels the user sees.
- * Keyframe writes still report dispatch because their existing actor catches
- * its own failure instead of returning a landed signal.
- */
+/** Ari: await shared motion writes, then verify saved source and return its current id.
+ * Preview pixels and creative quality still need an explicit visual check. */
 
+import { motionPresetProperties, type StudioMotionOptions } from "../../utils/studioMotionPreset";
+import { parseEase } from "../easeContract";
+import {
+  resolveSceneWrite,
+  SCENE_INSTANCE_SCHEMA,
+  SCENE_TIME_BASIS_SCHEMA,
+  type SceneReceipt,
+  type SceneToolDeps,
+} from "./animationScene";
+import { settleAnimationWrite, type AnimationSourceSnapshot } from "./animationReadback";
 import type { DomEditSelection } from "../../components/editor/domEditingTypes";
 import { toolFailure, type ToolFailure } from "../toolResult";
 import {
-  dispatched,
   runTargetedWrite,
   type StudioWriteResult,
   type TargetedWriteDeps,
@@ -22,14 +24,25 @@ export type GsapMethod = "to" | "from" | "set" | "fromTo";
 
 const METHODS: readonly GsapMethod[] = ["to", "from", "set", "fromTo"];
 
-export interface AnimationToolDeps extends TargetedWriteDeps {
-  getAnimationsForSelection: (selection: DomEditSelection) => Promise<readonly { id: string }[]>;
+export interface AnimationToolDeps extends TargetedWriteDeps, SceneToolDeps {
+  getAnimationsForSelection: (
+    selection: DomEditSelection,
+  ) => Promise<readonly { id: string; keyframes?: unknown }[]>;
   readPlayhead: () => { currentTime: number; duration: number; isPlaying: boolean };
-  addAnimation: (selection: DomEditSelection, method: GsapMethod) => Promise<boolean>;
+  readAnimationSource?: (selection: DomEditSelection) => Promise<AnimationSourceSnapshot>;
+  addAnimation: (
+    selection: DomEditSelection,
+    method: GsapMethod,
+    options?: StudioMotionOptions,
+    /** The placement whose clock `options.position` was already resolved against.
+     * Without it the writer cannot tell a chosen instance from an ambiguous one
+     * and refuses a nested add outright. */
+    instance?: string | null,
+  ) => Promise<boolean>;
   updateAnimation: (
     selection: DomEditSelection,
     animationId: string,
-    updates: { duration?: number; ease?: string; position?: number },
+    updates: { duration?: number; ease?: string; easeEach?: string; position?: number },
   ) => Promise<boolean>;
   addKeyframe: (
     selection: DomEditSelection,
@@ -42,19 +55,29 @@ export interface AnimationToolDeps extends TargetedWriteDeps {
 
 const INSPECT_HINT = "Call studio_inspect to see the result.";
 
+async function findOwnedAnimation(
+  deps: AnimationToolDeps,
+  selection: DomEditSelection,
+  animationId: string,
+): Promise<{ id: string; keyframes?: unknown } | ToolFailure> {
+  const animations = await deps.getAnimationsForSelection(selection);
+  return (
+    animations.find((animation) => animation.id === animationId) ??
+    toolFailure(
+      "invalid",
+      `animation ${animationId} does not belong to the target handle`,
+      "Select the target, then call studio_inspect for its current animation ids.",
+    )
+  );
+}
+
 async function animationBelongsToTarget(
   deps: AnimationToolDeps,
   selection: DomEditSelection,
   animationId: string,
 ): Promise<ToolFailure | null> {
-  const animations = await deps.getAnimationsForSelection(selection);
-  return animations.some((animation) => animation.id === animationId)
-    ? null
-    : toolFailure(
-        "invalid",
-        `animation ${animationId} does not belong to the target handle`,
-        "Select the target, then call studio_inspect for its current animation ids.",
-      );
+  const found = await findOwnedAnimation(deps, selection, animationId);
+  return "ok" in found ? found : null;
 }
 
 function readAnimationId(value: unknown): string | null {
@@ -67,14 +90,30 @@ function isRawGsapExpression(value: unknown): value is string {
 
 export interface StudioAddAnimationResult {
   method: GsapMethod;
-  /** Where it was inserted, which is the playhead, not a value you supplied. */
+  /**
+   * Where it was inserted, in the SCENE's own clock — which is what was written
+   * to source. `scene.masterPosition` is the same moment in master time.
+   */
   insertedAtSeconds: number;
-  dispatched: true;
+  /** Present only for a nested target: both times and the chosen instance. */
+  scene?: SceneReceipt;
+  /** How many placements of a shared scene source this one edit changes. */
+  affectsInstances?: number;
+  dispatched?: true;
 }
 
 export async function studioAddAnimation(
   deps: AnimationToolDeps,
-  input: { handle?: unknown; method?: unknown },
+  input: {
+    handle?: unknown;
+    method?: unknown;
+    preset?: unknown;
+    position?: unknown;
+    duration?: unknown;
+    ease?: unknown;
+    timeBasis?: unknown;
+    instance?: unknown;
+  },
   signal: AbortSignal = new AbortController().signal,
 ): Promise<StudioWriteResult<StudioAddAnimationResult>> {
   const method = METHODS.find((candidate) => candidate === input.method);
@@ -84,13 +123,69 @@ export async function studioAddAnimation(
       toolFailure("invalid", `method must be one of ${METHODS.join(", ")}`),
     );
   }
+  const options: StudioMotionOptions = {};
+  if (input.preset !== undefined) {
+    if (method !== "from" || !["fade", "slide", "grow"].includes(String(input.preset)))
+      return preDispatchFailure(
+        "add-animation",
+        toolFailure("invalid", "preset requires from and fade, slide or grow"),
+      );
+    if (input.preset === "fade" || input.preset === "slide" || input.preset === "grow")
+      options.preset = input.preset;
+  }
+  for (const key of ["position", "duration"] as const) {
+    const value = input[key];
+    if (value !== undefined) {
+      if (
+        typeof value !== "number" ||
+        !Number.isFinite(value) ||
+        value < 0 ||
+        (key === "duration" && value === 0)
+      )
+        return preDispatchFailure(
+          "add-animation",
+          toolFailure("invalid", `${key} must be a valid non-negative time`),
+        );
+      options[key] = value;
+    }
+  }
+  if (input.ease !== undefined) {
+    // The closed ease contract, checked BEFORE the write: an unknown curve
+    // written to source reads back unchanged and would verify while GSAP
+    // silently played its default instead.
+    const parsed = parseEase(input.ease);
+    if (!parsed.ok)
+      return preDispatchFailure("add-animation", toolFailure("invalid", parsed.reason));
+    options.ease = parsed.ease;
+  }
+  // The fit check and the master->scene conversion both need the target's
+  // source file, which only exists once the handle resolves — so they run in
+  // preflight, still before anything is dispatched.
+  let scene: SceneReceipt | null = null;
   return runTargetedWrite(deps, {
     handle: input.handle,
     operation: "add-animation",
     signal,
+    preflight: (selection) => {
+      const clock = deps.readPlayhead();
+      const resolved = resolveSceneWrite(deps, selection, {
+        timeBasis: input.timeBasis,
+        instance: input.instance,
+        position: options.position ?? clock.currentTime,
+        duration: options.duration ?? 0,
+        compositionDuration: clock.duration,
+      });
+      if (!resolved.ok) return resolved;
+      scene = resolved.scene;
+      if (resolved.localPosition !== null) options.position = resolved.localPosition;
+      return null;
+    },
     write: async (selection) => {
       const { currentTime } = deps.readPlayhead();
-      const landed = await deps.addAnimation(selection, method);
+      const before = await deps.readAnimationSource?.(selection);
+      const landed = Object.keys(options).length
+        ? await deps.addAnimation(selection, method, options, scene?.instance ?? null)
+        : await deps.addAnimation(selection, method, undefined, scene?.instance ?? null);
       if (!landed) {
         return toolFailure(
           "failed",
@@ -98,14 +193,70 @@ export async function studioAddAnimation(
           "The target may be stale. Call studio_look and try again with its current handle.",
         );
       }
-      return dispatched({ method, insertedAtSeconds: currentTime, dispatched: true }, false);
+      const value = {
+        method,
+        insertedAtSeconds: options.position ?? currentTime,
+        ...(scene ? { scene, affectsInstances: scene.affectsInstances } : {}),
+        dispatched: true as const,
+      };
+      return settleAnimationWrite(deps, selection, before, value, {
+        kind: "add",
+        position: value.insertedAtSeconds,
+        method,
+        ...(options.duration !== undefined ? { duration: options.duration } : {}),
+        ...(options.ease !== undefined ? { ease: options.ease } : {}),
+        ...(options.preset ? { properties: motionPresetProperties(options.preset) } : {}),
+      });
     },
   });
 }
 
+export interface AnimationUpdates {
+  duration?: number;
+  ease?: string;
+  easeEach?: string;
+  position?: number;
+}
+
 export interface StudioUpdateAnimationResult {
   animationId: string;
-  updated: { duration?: number; ease?: string; position?: number };
+  /** `position` here is always the scene-local value written to source. */
+  updated: AnimationUpdates;
+  scene?: SceneReceipt;
+  affectsInstances?: number;
+}
+
+/** Timing and the requested curve, checked before anything is dispatched. */
+function readUpdateFields(input: {
+  duration?: unknown;
+  ease?: unknown;
+  easeEach?: unknown;
+  position?: unknown;
+}): { updates: AnimationUpdates; ease?: string; easeEachRequested: boolean } | ToolFailure {
+  const updates: AnimationUpdates = {};
+  if (typeof input.duration === "number" && Number.isFinite(input.duration)) {
+    if (input.duration < 0) return toolFailure("invalid", "duration must not be negative");
+    updates.duration = input.duration;
+  }
+  if (typeof input.position === "number" && Number.isFinite(input.position)) {
+    updates.position = input.position;
+  }
+  const requested = input.easeEach ?? input.ease;
+  const easeEachRequested = input.easeEach !== undefined;
+  if (isRawGsapExpression(requested)) {
+    return toolFailure("invalid", "raw JavaScript expressions are not accepted");
+  }
+  if (requested === undefined) {
+    if (Object.keys(updates).length === 0) {
+      return toolFailure("invalid", "give at least one of duration, ease, easeEach, position");
+    }
+    return { updates, easeEachRequested };
+  }
+  // The closed ease contract. A typo like power2.uot must never reach source:
+  // it would read back byte-identical and verify, while GSAP played its default.
+  const parsed = parseEase(requested);
+  if (!parsed.ok) return toolFailure("invalid", parsed.reason);
+  return { updates, ease: parsed.ease, easeEachRequested };
 }
 
 export async function studioUpdateAnimation(
@@ -115,7 +266,10 @@ export async function studioUpdateAnimation(
     animationId?: unknown;
     duration?: unknown;
     ease?: unknown;
+    easeEach?: unknown;
     position?: unknown;
+    timeBasis?: unknown;
+    instance?: unknown;
   },
   signal: AbortSignal = new AbortController().signal,
 ): Promise<StudioWriteResult<StudioUpdateAnimationResult>> {
@@ -126,38 +280,48 @@ export async function studioUpdateAnimation(
       toolFailure("invalid", "animationId must be a non-empty string", INSPECT_HINT),
     );
   }
-
-  const updates: { duration?: number; ease?: string; position?: number } = {};
-  if (typeof input.duration === "number" && Number.isFinite(input.duration)) {
-    if (input.duration < 0)
-      return preDispatchFailure(
-        "update-animation",
-        toolFailure("invalid", "duration must not be negative"),
-      );
-    updates.duration = input.duration;
-  }
-  if (isRawGsapExpression(input.ease)) {
-    return preDispatchFailure(
-      "update-animation",
-      toolFailure("invalid", "raw JavaScript expressions are not accepted"),
-    );
-  }
-  if (typeof input.ease === "string" && input.ease.trim()) updates.ease = input.ease;
-  if (typeof input.position === "number" && Number.isFinite(input.position)) {
-    updates.position = input.position;
-  }
-  if (Object.keys(updates).length === 0) {
-    return preDispatchFailure(
-      "update-animation",
-      toolFailure("invalid", "give at least one of duration, ease, position"),
-    );
-  }
+  const fields = readUpdateFields(input);
+  if ("ok" in fields) return preDispatchFailure("update-animation", fields);
+  // A keyframe tween's feel lives in `keyframes.easeEach`, not `ease` — the same
+  // choice `AnimationCard` makes. Writing `ease` there changes nothing visible.
+  let updates: AnimationUpdates = fields.updates;
+  let scene: SceneReceipt | null = null;
   return runTargetedWrite(deps, {
     handle: input.handle,
     operation: "update-animation",
     signal,
-    preflight: (selection) => animationBelongsToTarget(deps, selection, animationId),
+    preflight: async (selection) => {
+      const found = await findOwnedAnimation(deps, selection, animationId);
+      if ("ok" in found) return found;
+      if (updates.position !== undefined || input.timeBasis !== undefined || input.instance) {
+        const clock = deps.readPlayhead();
+        const resolved = resolveSceneWrite(deps, selection, {
+          timeBasis: input.timeBasis,
+          instance: input.instance,
+          position: updates.position ?? clock.currentTime,
+          duration: updates.duration ?? 0,
+          compositionDuration: clock.duration,
+        });
+        if (!resolved.ok) return resolved;
+        scene = resolved.scene;
+        if (resolved.localPosition !== null && updates.position !== undefined) {
+          updates = { ...updates, position: resolved.localPosition };
+        }
+      }
+      if (fields.ease === undefined) return null;
+      const hasKeyframes = Boolean(found.keyframes);
+      if (fields.easeEachRequested && !hasKeyframes) {
+        return toolFailure(
+          "invalid",
+          `animation ${animationId} has no keyframes, so easeEach would not apply`,
+          "Send ease instead, or add keyframes first.",
+        );
+      }
+      updates = { ...updates, [hasKeyframes ? "easeEach" : "ease"]: fields.ease };
+      return null;
+    },
     write: async (selection) => {
+      const before = await deps.readAnimationSource?.(selection);
       const landed = await deps.updateAnimation(selection, animationId, updates);
       if (!landed) {
         return toolFailure(
@@ -166,7 +330,17 @@ export async function studioUpdateAnimation(
           "The animation id may be stale. studio_inspect lists the current ones.",
         );
       }
-      return dispatched({ animationId, updated: updates }, false);
+      return settleAnimationWrite(
+        deps,
+        selection,
+        before,
+        {
+          animationId,
+          updated: updates,
+          ...(scene ? { scene, affectsInstances: scene.affectsInstances } : {}),
+        },
+        { kind: "update", animationId, updates },
+      );
     },
   });
 }
@@ -175,7 +349,7 @@ export interface StudioAddKeyframeResult {
   animationId: string;
   percent: number;
   properties: Record<string, number | string>;
-  dispatched: true;
+  dispatched?: true;
 }
 
 export async function studioAddKeyframe(
@@ -228,15 +402,22 @@ export async function studioAddKeyframe(
     signal,
     preflight: (selection) => animationBelongsToTarget(deps, selection, animationId),
     write: async (selection) => {
+      const before = await deps.readAnimationSource?.(selection);
       await deps.addKeyframe(selection, animationId, percent, properties);
-      return dispatched({ animationId, percent, properties, dispatched: true }, false);
+      return settleAnimationWrite(
+        deps,
+        selection,
+        before,
+        { animationId, percent, properties, dispatched: true as const },
+        { kind: "keyframe", animationId, percent, properties },
+      );
     },
   });
 }
 
 export interface StudioDeleteAnimationResult {
   animationId: string;
-  dispatched: true;
+  dispatched?: true;
 }
 
 export async function studioDeleteAnimation(
@@ -257,6 +438,7 @@ export async function studioDeleteAnimation(
     signal,
     preflight: (selection) => animationBelongsToTarget(deps, selection, animationId),
     write: async (selection) => {
+      const before = await deps.readAnimationSource?.(selection);
       const landed = await deps.deleteAnimation(selection, animationId);
       if (!landed) {
         return toolFailure(
@@ -265,20 +447,44 @@ export async function studioDeleteAnimation(
           "The animation id may be stale. studio_inspect lists the current ones.",
         );
       }
-      return dispatched({ animationId, dispatched: true }, false);
+      return settleAnimationWrite(
+        deps,
+        selection,
+        before,
+        { animationId, dispatched: true as const },
+        { kind: "delete", animationId },
+      );
     },
   });
 }
 
 const SETTLEMENT_NOTE =
   "Success means persistence and live-preview synchronization have finished. Inspect afterward when exact authored values matter.";
-const KEYFRAME_DISPATCH_CAVEAT = `Reports what was dispatched, not what landed: the keyframe actor does not report back. ${INSPECT_HINT}`;
+const KEYFRAME_DISPATCH_CAVEAT = `Ari verifies the saved keyframe properties against fresh source. ${INSPECT_HINT}`;
 
 export const STUDIO_ADD_ANIMATION_INPUT_SCHEMA = {
   type: "object",
   properties: {
     handle: { type: "string", description: "A source-safe element handle from studio_look." },
     method: { type: "string", enum: METHODS, description: "The GSAP method to add." },
+    preset: {
+      type: "string",
+      enum: ["fade", "slide", "grow"],
+      description: "Version 1 entrance preset; method must be from. One atomic write.",
+    },
+    position: {
+      type: "number",
+      minimum: 0,
+      description: "Start seconds in timeBasis; defaults to the playhead.",
+    },
+    duration: { type: "number", exclusiveMinimum: 0 },
+    timeBasis: SCENE_TIME_BASIS_SCHEMA,
+    instance: SCENE_INSTANCE_SCHEMA,
+    ease: {
+      type: "string",
+      description:
+        "A Studio ease name (power2.out, back.out(1.7), bounce.out, …), custom(M0,0 C x1,y1 x2,y2 1,1) with X in 0–1, spring(b), wiggle(n,type[,amplitude]) or hold. Anything else is refused before the write.",
+    },
   },
   required: ["handle", "method"],
   additionalProperties: false,
@@ -286,7 +492,10 @@ export const STUDIO_ADD_ANIMATION_INPUT_SCHEMA = {
 
 export const STUDIO_ADD_ANIMATION_DESCRIPTION = [
   "Add a GSAP animation to one element using its source-safe handle from studio_look.",
-  "It is inserted AT THE PLAYHEAD, which this tool does not control: call studio_seek first",
+  "Defaults to the playhead; supply position, duration and a preset for one atomic entrance.",
+  "An ease outside the closed vocabulary is refused before anything is written.",
+  "For a nested scene, position is in the scene's own clock unless timeBasis is master;",
+  "a scene placed more than once needs instance, and the receipt carries scene with both times.",
   "to choose when it starts. The result reports where the playhead actually was.",
   SETTLEMENT_NOTE,
   WRITE_RECEIPT_DESCRIPTION,
@@ -298,8 +507,19 @@ export const STUDIO_UPDATE_ANIMATION_INPUT_SCHEMA = {
     handle: { type: "string", description: "A source-safe element handle from studio_look." },
     animationId: { type: "string", description: "An animation id from studio_inspect." },
     duration: { type: "number", minimum: 0, description: "Duration in seconds." },
-    ease: { type: "string", description: "A GSAP ease, for example power2.out." },
-    position: { type: "number", description: "Start position in seconds." },
+    ease: {
+      type: "string",
+      description:
+        "A Studio ease name (power2.out, back.out(1.7), bounce.out, …), custom(M0,0 C x1,y1 x2,y2 1,1) with X in 0–1, spring(b), wiggle(n,type[,amplitude]) or hold. Anything else is refused before the write.",
+    },
+    easeEach: {
+      type: "string",
+      description:
+        "Same vocabulary as ease, for a keyframe animation. Usually unnecessary: ease alone routes to easeEach when the animation has keyframes.",
+    },
+    position: { type: "number", description: "Start position in seconds, in timeBasis." },
+    timeBasis: SCENE_TIME_BASIS_SCHEMA,
+    instance: SCENE_INSTANCE_SCHEMA,
   },
   required: ["handle", "animationId"],
   additionalProperties: false,
@@ -307,6 +527,10 @@ export const STUDIO_UPDATE_ANIMATION_INPUT_SCHEMA = {
 
 export const STUDIO_UPDATE_ANIMATION_DESCRIPTION = [
   "Change an existing animation's duration, ease or position.",
+  "The ease vocabulary is closed and validated before the write; an unknown curve is refused.",
+  "A keyframe animation's feel is written to easeEach, which the tool picks for you.",
+  "position follows timeBasis; a master time is converted to the scene's clock before the write.",
+  "The receipt and studio_inspect both carry easeCurve with the curve's numbers.",
   "It waits for persistence and live-preview synchronization before reporting success.",
   "Get current ids from studio_inspect.",
   WRITE_RECEIPT_DESCRIPTION,
