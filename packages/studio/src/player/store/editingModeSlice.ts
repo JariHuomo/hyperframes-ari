@@ -1,3 +1,4 @@
+// Modified for Ari Studio; changes documented in /ARI.md.
 /**
  * The two editing-mode toggles the timeline toolbar owns.
  *
@@ -13,6 +14,9 @@
 import type { StoreApi } from "zustand";
 
 export interface EditingModeSlice {
+  /** Ari fork: shared so header actions can reveal panels hidden by focus mode. */
+  studioFocusMode: boolean;
+  setStudioFocusMode: (focused: boolean) => void;
   /** Motion-path "set destination" mode. Armed from the preview toolbar
    *  (replaces the old double-click-on-canvas UX); while armed, one canvas
    *  click places the new path's destination. */
@@ -35,11 +39,14 @@ export function createEditingModeSlice(
   set: StoreApi<EditingModeSlice>["setState"],
 ): EditingModeSlice {
   return {
+    studioFocusMode: true,
+    setStudioFocusMode: (focused) => set({ studioFocusMode: focused }),
     motionPathArmed: false,
     setMotionPathArmed: (armed) => set({ motionPathArmed: armed }),
     motionPathCreateAvailable: false,
     setMotionPathCreateAvailable: (available) => set({ motionPathCreateAvailable: available }),
-    autoKeyframeEnabled: true,
+    // Ari fork: moving an element must not silently record motion after reload.
+    autoKeyframeEnabled: false,
     setAutoKeyframeEnabled: (enabled) => set({ autoKeyframeEnabled: enabled }),
   };
 }

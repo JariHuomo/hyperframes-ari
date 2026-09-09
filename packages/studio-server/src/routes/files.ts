@@ -1,7 +1,9 @@
+// Modified for Ari Studio; changes documented in /ARI.md.
 // fallow-ignore-file code-duplication
 // executeGsapMutationRecast and executeGsapMutationAcorn are intentionally
 // parallel — two writers, same switch-case interface. Structural duplication
 // is load-bearing (both paths must remain testable in isolation).
+import { bootstrapGsap } from "../helpers/bootstrapGsap.js";
 import type { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
@@ -1224,19 +1226,8 @@ async function prepareGsapMutationScript(
   let html = beforeHtml;
   let block = extractGsapScriptBlock(html);
   if (!block && (firstMutation.type === "add" || firstMutation.type === "add-with-keyframes")) {
-    const compId = html.match(/data-composition-id="([^"]+)"/)?.[1] ?? "main";
     const { GSAP_CDN } = await import("@hyperframes/core");
-    const bootstrap = [
-      `<script src="${GSAP_CDN}"></script>`,
-      "<script>",
-      "window.__timelines = window.__timelines || {};",
-      "const tl = gsap.timeline({ paused: true });",
-      `window.__timelines["${compId}"] = tl;`,
-      "</script>",
-    ].join("\n");
-    html = html.includes("</body>")
-      ? html.replace("</body>", `${bootstrap}\n</body>`)
-      : `${html}\n${bootstrap}`;
+    html = bootstrapGsap(html, GSAP_CDN);
     block = extractGsapScriptBlock(html);
   }
   if (

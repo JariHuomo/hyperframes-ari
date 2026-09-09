@@ -1,3 +1,4 @@
+// Modified for Ari Studio; changes documented in /ARI.md.
 import { useCallback, type ReactNode } from "react";
 import { PreviewPane } from "./nle/PreviewPane";
 import { TimelinePane } from "./nle/TimelinePane";
@@ -237,6 +238,8 @@ function EditorShellBody({
   onDeleteElement,
 }: EditorShellBodyProps) {
   const { compositionStack, updateCompositionStack, containerRef } = useNLEContext();
+  const focusMode = usePlayerStore((state) => state.studioFocusMode);
+  const setFocusMode = usePlayerStore((state) => state.setStudioFocusMode);
 
   // The caption track's blocks are seek targets; CaptionTimeline took an onSeek
   // prop that nothing ever passed, so clicking a block did nothing.
@@ -263,13 +266,12 @@ function EditorShellBody({
       onKeyDown={handleKeyDown}
       tabIndex={-1}
     >
-      {/* Renders nothing; exposes Studio's state to an agentic browser. Mounted
-          here rather than in App because it needs the DomEdit contexts. */}
-      <StudioAgentTools />
+      {/* Shared agent tools and Ari controls need the same DomEdit contexts. */}
+      <StudioAgentTools focusMode={focusMode} onToggleFocus={() => setFocusMode(!focusMode)} />
       {/* Top row: [left | preview | right] — outer padding + the 8px resize
           seams give the panels CapCut-style separation on the dark canvas. */}
       <div className="flex flex-row flex-1 min-h-0 px-px pt-px">
-        {left}
+        {!focusMode && left}
         <div className="flex-1 min-w-0 flex flex-col relative">
           <PreviewPane
             previewOverlay={previewOverlay}
@@ -277,32 +279,34 @@ function EditorShellBody({
             onPreviewBlockDrop={onPreviewBlockDrop}
           />
         </div>
-        {right}
+        {!focusMode && right}
       </div>
 
       {/* Full-width timeline row */}
-      <TimelinePane
-        timelineToolbar={timelineToolbar}
-        renderClipContent={renderClipContent}
-        onFileDrop={onFileDrop}
-        onAssetDrop={onAssetDrop}
-        onBlockDrop={onBlockDrop}
-        onCompositionDrop={onCompositionDrop}
-        onDeleteElement={onDeleteElement}
-        onSelectTimelineElement={onSelectTimelineElement}
-        timelineFooter={
-          captionEditMode ? (
-            <div className="border-t border-neutral-800/30 flex-shrink-0" style={{ height: 60 }}>
-              <div className="flex items-center gap-1.5 px-2 py-0.5">
-                <span className="text-[9px] font-medium text-neutral-500 uppercase tracking-wider">
-                  Captions
-                </span>
+      <div className={focusMode ? "hidden" : "contents"}>
+        <TimelinePane
+          timelineToolbar={timelineToolbar}
+          renderClipContent={renderClipContent}
+          onFileDrop={onFileDrop}
+          onAssetDrop={onAssetDrop}
+          onBlockDrop={onBlockDrop}
+          onCompositionDrop={onCompositionDrop}
+          onDeleteElement={onDeleteElement}
+          onSelectTimelineElement={onSelectTimelineElement}
+          timelineFooter={
+            captionEditMode ? (
+              <div className="border-t border-neutral-800/30 flex-shrink-0" style={{ height: 60 }}>
+                <div className="flex items-center gap-1.5 px-2 py-0.5">
+                  <span className="text-[9px] font-medium text-neutral-500 uppercase tracking-wider">
+                    Captions
+                  </span>
+                </div>
+                <CaptionTimeline pixelsPerSecond={100} onSeek={seekCaptionTime} />
               </div>
-              <CaptionTimeline pixelsPerSecond={100} onSeek={seekCaptionTime} />
-            </div>
-          ) : undefined
-        }
-      />
+            ) : undefined
+          }
+        />
+      </div>
     </div>
   );
 }

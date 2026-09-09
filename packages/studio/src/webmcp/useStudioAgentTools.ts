@@ -1,4 +1,7 @@
-import { useEffect, useRef } from "react";
+// Modified for Ari Studio; changes documented in /ARI.md.
+import { useAriAgentBridge } from "../ari/useAriAgentBridge";
+import type { AriAgentBridge } from "../ari/agentBridge";
+import { useEffect, useRef, useMemo } from "react";
 import { trackEvent } from "../telemetry/client";
 import { readStudioUiPreferences } from "../utils/studioUiPreferences";
 import { makeStudioDebugLogger } from "../utils/studioDebug";
@@ -287,9 +290,11 @@ function readNumberInput(input: object, key: string): number {
  * lookup. Hot-module replacement can still create a brief unregister/register
  * window in development; production has one document-scoped registration.
  */
-export function useStudioAgentTools(deps: StudioAgentToolsDeps): void {
+export function useStudioAgentTools(deps: StudioAgentToolsDeps): AriAgentBridge | null {
   const depsRef = useRef(deps);
   depsRef.current = deps;
+  const tools = useMemo(() => buildStudioTools(depsRef), []);
+  const bridge = useAriAgentBridge(tools);
 
   // eslint-disable-next-line no-restricted-syntax
   useEffect(() => {
@@ -312,14 +317,11 @@ export function useStudioAgentTools(deps: StudioAgentToolsDeps): void {
       // The import is async, so the component may already be gone.
       if (controller.signal.aborted) return;
 
-      const report = await registerStudioTools(
-        modelContext,
-        buildStudioTools(depsRef),
-        controller.signal,
-      );
+      const report = await registerStudioTools(modelContext, tools, controller.signal);
       reportRegistration(report, native !== null);
     })();
 
     return () => controller.abort();
-  }, []);
+  }, [tools]);
+  return bridge;
 }

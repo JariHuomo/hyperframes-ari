@@ -1,3 +1,5 @@
+> **Ari Studio fork:** local, mixed script-and-visual editing. Start with [ARI.md](ARI.md). Upstream README follows.
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/logo/dark.svg">

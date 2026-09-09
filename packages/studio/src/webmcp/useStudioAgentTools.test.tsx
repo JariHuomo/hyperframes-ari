@@ -1,3 +1,4 @@
+// Modified for Ari Studio; changes documented in /ARI.md.
 // @vitest-environment jsdom
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -259,6 +260,7 @@ describe("useStudioAgentTools", () => {
     });
 
     expect(registerTool).not.toHaveBeenCalled();
+    expect(window.ariStudio).toBeUndefined();
   });
 
   it("registers when the preference is absent, because on is the default", async () => {

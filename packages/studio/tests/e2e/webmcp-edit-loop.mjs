@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Modified for Ari Studio; changes documented in /ARI.md.
 /**
  * Real-browser proof of Studio's complete WebMCP edit loop.
  *
@@ -231,6 +232,18 @@ async function waitForReadyLook(page) {
   throw new Error("studio_look never observed a ready scene");
 }
 
+// Seeking is read-only and may be refused while a prior write reloads the preview.
+async function seekWhenReady(page, time) {
+  const deadline = Date.now() + NAVIGATION_TIMEOUT_MS;
+  let receipt;
+  while (Date.now() < deadline) {
+    receipt = await callTool(page, "studio_seek", { time });
+    if (receipt.ok) return receipt;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 150));
+  }
+  throw new Error(`Could not seek ready preview: ${JSON.stringify(receipt)}`);
+}
+
 async function waitForLens(page, phase) {
   await page.waitForSelector(`[data-topology-lens="${phase}"] [data-topology-target="true"]`, {
     visible: true,
@@ -418,6 +431,8 @@ async function runBrowserProof(page) {
     waitUntil: "domcontentloaded",
     timeout: NAVIGATION_TIMEOUT_MS,
   });
+  // Ari opens with a large canvas; this regression also exercises native panels.
+  await page.locator("button::-p-text(Näytä työkalupaneelit)").click();
   const registeredTools = await waitForToolSurface(page);
   const definitions = await page.evaluate(() => window.__webMcpHarness.definitions());
   const writeTools = definitions.filter(
@@ -569,13 +584,27 @@ async function runBrowserProof(page) {
   );
 
   const animationTime = 0.25;
-  const seekBeforeAnimation = await callTool(page, "studio_seek", { time: animationTime });
+  const seekBeforeAnimation = await seekWhenReady(page, animationTime);
   assert(seekBeforeAnimation.ok, "Could not seek before the live-animation proof");
   const previewBeforeAnimation = await capturePreviewHash(page);
-  const animationReceipt = await callTool(page, "studio_add_animation", {
+  let animationReceipt = await callTool(page, "studio_add_animation", {
     handle: left.handle,
     method: "from",
   });
+  // A watcher reload may detach the target during preflight. Only this explicit
+  // pre-dispatch refusal is retried; a dispatched write is never replayed.
+  if (
+    !animationReceipt.ok &&
+    animationReceipt.stage === "refused" &&
+    animationReceipt.reason === "the target changed while it was resolving"
+  ) {
+    const fresh = targetForSource(await waitForReadyLook(page), "compositions/left-card.html");
+    await selectWithBoundedReacquire(page, fresh, "compositions/left-card.html");
+    animationReceipt = await callTool(page, "studio_add_animation", {
+      handle: fresh.handle,
+      method: "from",
+    });
+  }
   assert(
     animationReceipt.ok,
     `Animation write failed: ${JSON.stringify(animationReceipt)}; mutation=${JSON.stringify(mutationResponses.at(-1))}`,
@@ -585,9 +614,11 @@ async function runBrowserProof(page) {
     sourceAfterAnimation.includes("gsap"),
     "Animation tool returned before the GSAP source write was durable",
   );
-  const seekAfterAnimation = await callTool(page, "studio_seek", { time: animationTime });
+  const seekAfterAnimation = await seekWhenReady(page, animationTime);
   assert(seekAfterAnimation.ok, "Could not seek after the live-animation proof");
-  const previewAfterAnimation = await capturePreviewHash(page);
+  // The tool reports dispatched, not verified; await observable pixels after
+  // the first-animation bootstrap triggers a full preview load.
+  const previewAfterAnimation = await waitForPreviewHashChange(page, previewBeforeAnimation);
   assert(
     previewAfterAnimation !== previewBeforeAnimation,
     "Open Studio preview pixels stayed stale after animation success",

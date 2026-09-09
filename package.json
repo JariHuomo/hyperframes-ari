@@ -57,7 +57,11 @@
     "upload:docs-images": "bash scripts/upload-docs-images.sh",
     "host:registry-assets": "bun run scripts/host-registry-assets.ts",
     "prepare": "test -d .git && lefthook install || true",
-    "lint:registry-items": "node scripts/lint-registry-items.mjs"
+    "lint:registry-items": "node scripts/lint-registry-items.mjs",
+    "ari:studio": "node scripts/ari-studio.mjs",
+    "ari:build": "HYPERFRAMES_NO_TELEMETRY=1 VITE_HYPERFRAMES_NO_TELEMETRY=1 bun run build",
+    "ari:test": "bun run --cwd packages/studio test src/ari src/webmcp src/player/store/playerStore.test.ts src/components/TimelineToolbar.test.tsx",
+    "ari:test:browser": "node packages/studio/tests/e2e/ari-edit-loop.mjs"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.5.0",

@@ -1,3 +1,5 @@
+// Modified for Ari Studio; changes documented in /ARI.md.
+import { AriControlPanel } from "../ari/AriControlPanel";
 import { useCallback, useEffect, useMemo } from "react";
 import { useDomEditActionsContext, useDomEditSelectionContext } from "../contexts/DomEditContext";
 import { useStudioShellContext } from "../contexts/StudioContext";
@@ -46,7 +48,7 @@ export function resizeSelectionFromAgent(
 }
 
 /**
- * Mounts Studio's WebMCP tool surface. Renders nothing.
+ * Mounts the shared WebMCP/script tools and Ari's visible control panel.
  *
  * Lives inside `EditorShell` rather than `App` for two reasons: the DomEdit
  * contexts are only readable below `DomEditProvider`, which `App` renders, and
@@ -56,7 +58,13 @@ export function resizeSelectionFromAgent(
  * subscribed to. Subscribing to `currentTime` would re-render this component on
  * every animation frame during playback for a value nothing here displays.
  */
-export function StudioAgentTools() {
+export function StudioAgentTools({
+  focusMode,
+  onToggleFocus,
+}: {
+  focusMode: boolean;
+  onToggleFocus: () => void;
+}) {
   const { projectId, activeCompPath, editHistory, writeBlockedReason } = useStudioShellContext();
   const {
     domEditSelection,
@@ -204,6 +212,13 @@ export function StudioAgentTools() {
     ],
   );
 
-  useStudioAgentTools(deps);
-  return null;
+  const bridge = useStudioAgentTools(deps);
+  return (
+    <AriControlPanel
+      bridge={bridge}
+      getSnapshot={getSnapshot}
+      focusMode={focusMode}
+      onToggleFocus={onToggleFocus}
+    />
+  );
 }
