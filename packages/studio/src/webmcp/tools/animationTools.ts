@@ -2,7 +2,12 @@
  * Preview pixels and creative quality still need an explicit visual check. */
 
 import { motionPresetProperties, type StudioMotionOptions } from "../../utils/studioMotionPreset";
-import { parseEase } from "../easeContract";
+import {
+  readMotionOptions,
+  readUpdateFields,
+  isRawGsapExpression,
+  updateTiming,
+} from "./animationInputs";
 import {
   resolveSceneWrite,
   SCENE_INSTANCE_SCHEMA,
@@ -27,7 +32,9 @@ const METHODS: readonly GsapMethod[] = ["to", "from", "set", "fromTo"];
 export interface AnimationToolDeps extends TargetedWriteDeps, SceneToolDeps {
   getAnimationsForSelection: (
     selection: DomEditSelection,
-  ) => Promise<readonly { id: string; keyframes?: unknown }[]>;
+  ) => Promise<
+    readonly { id: string; keyframes?: unknown; position?: unknown; duration?: unknown }[]
+  >;
   readPlayhead: () => { currentTime: number; duration: number; isPlaying: boolean };
   readAnimationSource?: (selection: DomEditSelection) => Promise<AnimationSourceSnapshot>;
   addAnimation: (
@@ -59,7 +66,9 @@ async function findOwnedAnimation(
   deps: AnimationToolDeps,
   selection: DomEditSelection,
   animationId: string,
-): Promise<{ id: string; keyframes?: unknown } | ToolFailure> {
+): Promise<
+  { id: string; keyframes?: unknown; position?: unknown; duration?: unknown } | ToolFailure
+> {
   const animations = await deps.getAnimationsForSelection(selection);
   return (
     animations.find((animation) => animation.id === animationId) ??
@@ -82,10 +91,6 @@ async function animationBelongsToTarget(
 
 function readAnimationId(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
-}
-
-function isRawGsapExpression(value: unknown): value is string {
-  return typeof value === "string" && value.startsWith("__raw:");
 }
 
 export interface StudioAddAnimationResult {
@@ -123,41 +128,8 @@ export async function studioAddAnimation(
       toolFailure("invalid", `method must be one of ${METHODS.join(", ")}`),
     );
   }
-  const options: StudioMotionOptions = {};
-  if (input.preset !== undefined) {
-    if (method !== "from" || !["fade", "slide", "grow"].includes(String(input.preset)))
-      return preDispatchFailure(
-        "add-animation",
-        toolFailure("invalid", "preset requires from and fade, slide or grow"),
-      );
-    if (input.preset === "fade" || input.preset === "slide" || input.preset === "grow")
-      options.preset = input.preset;
-  }
-  for (const key of ["position", "duration"] as const) {
-    const value = input[key];
-    if (value !== undefined) {
-      if (
-        typeof value !== "number" ||
-        !Number.isFinite(value) ||
-        value < 0 ||
-        (key === "duration" && value === 0)
-      )
-        return preDispatchFailure(
-          "add-animation",
-          toolFailure("invalid", `${key} must be a valid non-negative time`),
-        );
-      options[key] = value;
-    }
-  }
-  if (input.ease !== undefined) {
-    // The closed ease contract, checked BEFORE the write: an unknown curve
-    // written to source reads back unchanged and would verify while GSAP
-    // silently played its default instead.
-    const parsed = parseEase(input.ease);
-    if (!parsed.ok)
-      return preDispatchFailure("add-animation", toolFailure("invalid", parsed.reason));
-    options.ease = parsed.ease;
-  }
+  const options = readMotionOptions(input, method);
+  if ("ok" in options) return preDispatchFailure("add-animation", options);
   // The fit check and the master->scene conversion both need the target's
   // source file, which only exists once the handle resolves — so they run in
   // preflight, still before anything is dispatched.
@@ -183,9 +155,12 @@ export async function studioAddAnimation(
     write: async (selection) => {
       const { currentTime } = deps.readPlayhead();
       const before = await deps.readAnimationSource?.(selection);
-      const landed = Object.keys(options).length
-        ? await deps.addAnimation(selection, method, options, scene?.instance ?? null)
-        : await deps.addAnimation(selection, method, undefined, scene?.instance ?? null);
+      const landed = await deps.addAnimation(
+        selection,
+        method,
+        Object.keys(options).length ? options : undefined,
+        scene?.instance ?? null,
+      );
       if (!landed) {
         return toolFailure(
           "failed",
@@ -203,8 +178,8 @@ export async function studioAddAnimation(
         kind: "add",
         position: value.insertedAtSeconds,
         method,
-        ...(options.duration !== undefined ? { duration: options.duration } : {}),
-        ...(options.ease !== undefined ? { ease: options.ease } : {}),
+        duration: options.duration,
+        ease: options.ease,
         ...(options.preset ? { properties: motionPresetProperties(options.preset) } : {}),
       });
     },
@@ -227,38 +202,6 @@ export interface StudioUpdateAnimationResult {
 }
 
 /** Timing and the requested curve, checked before anything is dispatched. */
-function readUpdateFields(input: {
-  duration?: unknown;
-  ease?: unknown;
-  easeEach?: unknown;
-  position?: unknown;
-}): { updates: AnimationUpdates; ease?: string; easeEachRequested: boolean } | ToolFailure {
-  const updates: AnimationUpdates = {};
-  if (typeof input.duration === "number" && Number.isFinite(input.duration)) {
-    if (input.duration < 0) return toolFailure("invalid", "duration must not be negative");
-    updates.duration = input.duration;
-  }
-  if (typeof input.position === "number" && Number.isFinite(input.position)) {
-    updates.position = input.position;
-  }
-  const requested = input.easeEach ?? input.ease;
-  const easeEachRequested = input.easeEach !== undefined;
-  if (isRawGsapExpression(requested)) {
-    return toolFailure("invalid", "raw JavaScript expressions are not accepted");
-  }
-  if (requested === undefined) {
-    if (Object.keys(updates).length === 0) {
-      return toolFailure("invalid", "give at least one of duration, ease, easeEach, position");
-    }
-    return { updates, easeEachRequested };
-  }
-  // The closed ease contract. A typo like power2.uot must never reach source:
-  // it would read back byte-identical and verify, while GSAP played its default.
-  const parsed = parseEase(requested);
-  if (!parsed.ok) return toolFailure("invalid", parsed.reason);
-  return { updates, ease: parsed.ease, easeEachRequested };
-}
-
 export async function studioUpdateAnimation(
   deps: AnimationToolDeps,
   input: {
@@ -293,13 +236,11 @@ export async function studioUpdateAnimation(
     preflight: async (selection) => {
       const found = await findOwnedAnimation(deps, selection, animationId);
       if ("ok" in found) return found;
-      if (updates.position !== undefined || input.timeBasis !== undefined || input.instance) {
+      {
         const clock = deps.readPlayhead();
         const resolved = resolveSceneWrite(deps, selection, {
-          timeBasis: input.timeBasis,
+          ...updateTiming(updates, input.timeBasis, found),
           instance: input.instance,
-          position: updates.position ?? clock.currentTime,
-          duration: updates.duration ?? 0,
           compositionDuration: clock.duration,
         });
         if (!resolved.ok) return resolved;

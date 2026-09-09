@@ -100,7 +100,17 @@ describe("useGsapAnimationOps settlement", () => {
     ...overrides,
   });
 
-  it("still refuses when the scene plays twice and no instance was named", async () => {
+  async function addToSecondScene(api: ReturnType<typeof renderOps>) {
+    await api.addGsapAnimation(
+      { ...selection, sourceFile: "scene.html" },
+      "from",
+      5,
+      undefined,
+      "host-b",
+    );
+  }
+
+  function repeatedSceneOps() {
     const commit = vi.fn(async () => undefined);
     const api = renderOps(
       vi.fn(async () => undefined),
@@ -110,6 +120,11 @@ describe("useGsapAnimationOps settlement", () => {
         sceneClip({ id: "host-b", compositionId: "b", start: 4 }),
       ],
     );
+    return { api, commit };
+  }
+
+  it("still refuses when the scene plays twice and no instance was named", async () => {
+    const { api, commit } = repeatedSceneOps();
 
     await expect(
       api.addGsapAnimation({ ...selection, sourceFile: "scene.html" }, "from", 5),
@@ -136,23 +151,9 @@ describe("useGsapAnimationOps settlement", () => {
   });
 
   it("converts for the named placement when the scene plays twice", async () => {
-    const commit = vi.fn(async () => undefined);
-    const api = renderOps(
-      vi.fn(async () => undefined),
-      commit,
-      () => [
-        sceneClip({ id: "host-a", compositionId: "a", start: 0 }),
-        sceneClip({ id: "host-b", compositionId: "b", start: 4 }),
-      ],
-    );
+    const { api, commit } = repeatedSceneOps();
 
-    await api.addGsapAnimation(
-      { ...selection, sourceFile: "scene.html" },
-      "from",
-      5,
-      undefined,
-      "host-b",
-    );
+    await addToSecondScene(api);
 
     expect(commit).toHaveBeenCalledWith(
       expect.anything(),
@@ -162,23 +163,9 @@ describe("useGsapAnimationOps settlement", () => {
   });
   /** The add-writer edits the SCENE's own file, never the master's script. */
   it("commits a nested add against the scene source file", async () => {
-    const commit = vi.fn(async () => undefined);
-    const api = renderOps(
-      vi.fn(async () => undefined),
-      commit,
-      () => [
-        sceneClip({ id: "host-a", compositionId: "a", start: 0 }),
-        sceneClip({ id: "host-b", compositionId: "b", start: 4 }),
-      ],
-    );
+    const { api, commit } = repeatedSceneOps();
 
-    await api.addGsapAnimation(
-      { ...selection, sourceFile: "scene.html" },
-      "from",
-      5,
-      undefined,
-      "host-b",
-    );
+    await addToSecondScene(api);
 
     expect(commit).toHaveBeenCalledWith(
       expect.objectContaining({ sourceFile: "scene.html" }),
@@ -191,15 +178,7 @@ describe("useGsapAnimationOps settlement", () => {
    * over; re-deciding the placement here would refuse a write that is already
    * unambiguous, which is what left nested adds failing. */
   it("accepts an already-local position on an ambiguous scene without an instance", async () => {
-    const commit = vi.fn(async () => undefined);
-    const api = renderOps(
-      vi.fn(async () => undefined),
-      commit,
-      () => [
-        sceneClip({ id: "host-a", compositionId: "a", start: 0 }),
-        sceneClip({ id: "host-b", compositionId: "b", start: 4 }),
-      ],
-    );
+    const { api, commit } = repeatedSceneOps();
 
     await api.addGsapAnimation({ ...selection, sourceFile: "scene.html" }, "from", 5, {
       position: 0.3,

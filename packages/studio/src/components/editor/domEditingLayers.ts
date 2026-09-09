@@ -425,8 +425,6 @@ export async function refreshDomEditSelection(
     : null;
 }
 
-// ─── Layer items ─────────────────────────────────────────────────────────────
-
 export function getDomEditLayerKey(
   target: Pick<DomEditSelection, "id" | "selector" | "selectorIndex" | "sourceFile">,
 ): string {
@@ -466,6 +464,7 @@ export function collectDomEditLayerItems(
   root: HTMLElement | null | undefined,
   options: DomEditContextOptions,
   maxItems = Number.POSITIVE_INFINITY,
+  includeHidden = false,
 ): DomEditLayerItem[] {
   if (!root) return [];
 
@@ -474,7 +473,7 @@ export function collectDomEditLayerItems(
   const visit = (el: HTMLElement, depth: number) => {
     if (items.length >= maxItems) return;
 
-    const target = getDomLayerPatchTarget(el, options.activeCompositionPath);
+    const target = getDomLayerPatchTarget(el, options.activeCompositionPath, includeHidden);
     if (target) {
       items.push({
         key: getDomEditLayerKey(target),

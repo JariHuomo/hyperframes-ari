@@ -193,7 +193,9 @@ export function collectStudioLookScene(
     isMasterView: !activeCompositionPath || activeCompositionPath === "index.html",
     activeGroupElement: null,
   };
-  const items = collectDomEditLayerItems(root, options);
+  // Ari is an authoring shelf, not canvas hit-testing: timed-out layers must
+  // remain addressable at every playhead position and after a preview reload.
+  const items = collectDomEditLayerItems(root, options, Number.POSITIVE_INFINITY, true);
   const liveGroup =
     activeGroupElement?.isConnected && activeGroupElement.ownerDocument === doc
       ? activeGroupElement
@@ -263,14 +265,7 @@ function describeScene(snapshot: StudioLookSnapshot): {
  * would repeat the same rows for every child of the same scene; the agent keys
  * into this list by an element's `sourceFile` instead.
  */
-function describeScenes(
-  snapshot: StudioLookSnapshot,
-  elements: readonly LookElement[],
-): StudioLook["scenes"] {
-  const deps = {
-    getClipManifest: () => snapshot.clipManifest ?? null,
-    getCompositionPath: () => snapshot.compositionPath,
-  };
+function nestedSceneSources(snapshot: StudioLookSnapshot, elements: readonly LookElement[]) {
   const active = normalizeSceneSourcePath(snapshot.compositionPath ?? "index.html");
   const sources = new Set<string>();
   for (const source of [
@@ -280,6 +275,18 @@ function describeScenes(
     const normalized = normalizeSceneSourcePath(source);
     if (normalized && normalized !== active) sources.add(normalized);
   }
+  return sources;
+}
+
+function describeScenes(
+  snapshot: StudioLookSnapshot,
+  elements: readonly LookElement[],
+): StudioLook["scenes"] {
+  const deps = {
+    getClipManifest: () => snapshot.clipManifest ?? null,
+    getCompositionPath: () => snapshot.compositionPath,
+  };
+  const sources = nestedSceneSources(snapshot, elements);
   const scenes: StudioLook["scenes"] = [];
   for (const sourceFile of sources) {
     const described = describeSceneInstances(deps, sourceFile);

@@ -27,7 +27,7 @@ interface UseStudioUrlStateParams {
   applyMarqueeSelection: (selections: DomEditSelection[], additive: boolean) => void;
   buildDomSelectionFromTarget: (
     target: HTMLElement,
-    options?: { preferClipAncestor?: boolean; skipSourceProbe?: boolean },
+    options?: { preferClipAncestor?: boolean; skipSourceProbe?: boolean; exactTarget?: boolean },
   ) => Promise<DomEditSelection | null>;
   applyDomSelection: (
     selection: DomEditSelection | null,
@@ -130,7 +130,11 @@ async function buildOptionalDomSelection(
   // round trips before the canvas answered anything, including a Delete press.
   // The marquee that produced these members already skips the probe for the
   // same reason; only the primary, whose panel reads the flag, still pays it.
-  return buildDomSelection(element, { preferClipAncestor: false, skipSourceProbe: true });
+  return buildDomSelection(element, {
+    preferClipAncestor: false,
+    skipSourceProbe: true,
+    exactTarget: true,
+  });
 }
 
 export async function resolveUrlSelections({
@@ -142,7 +146,10 @@ export async function resolveUrlSelections({
   isCurrent,
   buildDomSelection,
 }: ResolveUrlSelectionsParams): Promise<DomEditSelection[] | null> {
-  const primary = await buildDomSelection(primaryElement, { preferClipAncestor: false });
+  const primary = await buildDomSelection(primaryElement, {
+    preferClipAncestor: false,
+    exactTarget: true,
+  });
   if (!isCurrent()) return null;
   if (!primary) return [];
   const members = [primary];

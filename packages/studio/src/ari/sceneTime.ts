@@ -184,17 +184,24 @@ type LevelReading =
   | { readonly ok: true; readonly level: SceneInstanceAncestor }
   | { readonly ok: false; readonly reason: SceneTimeUnsupportedReason };
 
+function positiveTime(value: unknown): value is number {
+  return isFiniteNumber(value) && value > 0;
+}
+function nonnegativeTime(value: unknown): value is number {
+  return isFiniteNumber(value) && value >= 0;
+}
+
 function readLevel(clip: SceneTimeManifestClip, compositionId: string): LevelReading {
   if (!isFiniteNumber(clip.start)) return { ok: false, reason: "unresolved-host-start" };
-  if (!isFiniteNumber(clip.duration) || clip.duration <= 0) {
+  if (!positiveTime(clip.duration)) {
     return { ok: false, reason: "unresolved-host-duration" };
   }
   const playbackStart = clip.playbackStart ?? 0;
-  if (!isFiniteNumber(playbackStart) || playbackStart < 0) {
+  if (!nonnegativeTime(playbackStart)) {
     return { ok: false, reason: "unresolved-playback-start" };
   }
   const playbackRate = clip.playbackRate ?? 1;
-  if (!isFiniteNumber(playbackRate) || playbackRate <= 0) {
+  if (!positiveTime(playbackRate)) {
     return { ok: false, reason: "unresolved-playback-rate" };
   }
   return {
@@ -230,20 +237,26 @@ function collectAncestorClips(
   return chain;
 }
 
+function sceneIdentity(leaf: SceneTimeManifestClip, sourceFile: string) {
+  const compositionId = leaf.compositionId ?? null;
+  const hostId = leaf.id ?? compositionId;
+  return { hostId, hostLabel: leaf.label ?? hostId ?? sourceFile, compositionId };
+}
+
 function buildInstance(
   leaf: SceneTimeManifestClip,
   sourceFile: string,
   byCompositionId: ReadonlyMap<string, SceneTimeManifestClip>,
 ): SceneInstance | UnsupportedSceneInstance {
-  const hostId = leaf.id ?? leaf.compositionId ?? null;
-  const hostLabel = leaf.label ?? hostId ?? sourceFile;
+  const identity = sceneIdentity(leaf, sourceFile);
+  const { hostId, hostLabel, compositionId } = identity;
   const refuse = (
     reason: SceneTimeUnsupportedReason,
     atCompositionId: string | null,
   ): UnsupportedSceneInstance => ({
     hostId,
     hostLabel,
-    compositionId: leaf.compositionId ?? null,
+    compositionId,
     sourceFile,
     reason,
     atCompositionId,
@@ -257,8 +270,8 @@ function buildInstance(
     if (!reading.ok) return refuse(reading.reason, entry.compositionId);
     ancestors.push(reading.level);
   }
-  const leafReading = readLevel(leaf, leaf.compositionId ?? hostId);
-  if (!leafReading.ok) return refuse(leafReading.reason, leaf.compositionId ?? null);
+  const leafReading = readLevel(leaf, compositionId ?? hostId);
+  if (!leafReading.ok) return refuse(leafReading.reason, compositionId);
 
   // Fold master -> level_1 -> ... -> leaf. See the recurrence in the header.
   let anchor = 0;
@@ -287,7 +300,7 @@ function buildInstance(
   return {
     hostId,
     hostLabel,
-    compositionId: leaf.compositionId ?? null,
+    compositionId,
     sourceFile,
     start: anchor,
     duration: Math.max(0, visibleEnd - visibleStart),

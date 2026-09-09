@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { ariControls, prepareDownload, probeVideo, downloadExport } from "./ariBrowserEvidence.mjs";
 /**
  * Sprint item U2: the browser UAT for curves and nested-scene time.
  *
@@ -26,29 +27,32 @@ import { mkdirSync, cpSync, rmSync, readFileSync, writeFileSync, existsSync } fr
 import { resolve, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import puppeteer from "puppeteer-core";
 import { resolveChromeExecutable } from "./chrome-executable.mjs";
 
 const root = resolve(import.meta.dirname, "../../../..");
-const fixtureDir = join(root, "examples/rajamarket-scenes");
+const fixtureDir = resolve(
+  process.env.ARI_SCENES_FIXTURE || join(import.meta.dirname, "fixtures/ari-scenes"),
+);
 const project = "rajamarket-scenes-e2e";
 const dir = join(root, "examples", project);
 const port = Number(process.env.ARI_SCENES_PORT || 3083);
 const uiOnly = process.env.ARI_UI_ONLY === "1";
 const headed = process.env.ARI_HEADED === "1";
 const mode = uiOnly ? "ui-only" : "mixed";
-const uatRoot = join(root, "screenshots/2026-09-09-scenes-curves/uat");
+const uatRoot = resolve(
+  process.env.ARI_SCENES_EVIDENCE || join(root, "screenshots/2026-09-09-sprint-final/uat"),
+);
 const evidence = join(uatRoot, mode);
 const origin = `http://127.0.0.1:${port}`;
 
 // --- the fixture ------------------------------------------------------------
-// examples/* is gitignored, so a fresh clone has no fixture. Say so plainly
-// rather than failing later with a missing selector.
+// A portable synthetic fixture ships with the source; an override may use local brand assets.
 if (!existsSync(join(fixtureDir, "index.html")) || !existsSync(join(fixtureDir, "scenes"))) {
   throw new Error(
     `Fixture puuttuu: ${fixtureDir}\n` +
-      "examples/* on gitignoressa, joten rajamarket-scenes ei tule mukana kloonissa.\n" +
-      "Luo se sprintin kohdan U1 mukaan (examples/rajamarket-scenes/README.md).",
+      "Palauta packages/studio/tests/e2e/fixtures/ari-scenes tai aseta ARI_SCENES_FIXTURE.",
   );
 }
 rmSync(dir, { recursive: true, force: true });
@@ -57,6 +61,10 @@ for (const file of ["index.html", "hyperframes.json"])
   cpSync(join(fixtureDir, file), join(dir, file));
 for (const folder of ["scenes", "assets"])
   cpSync(join(fixtureDir, folder), join(dir, folder), { recursive: true });
+cpSync(
+  createRequire(join(root, "packages/studio/package.json")).resolve("gsap/dist/gsap.min.js"),
+  join(dir, "assets/gsap.min.js"),
+);
 mkdirSync(evidence, { recursive: true });
 
 const headlineScene = join(dir, "scenes/headline-card.html");
@@ -65,8 +73,8 @@ const masterFile = join(dir, "index.html");
 const sha = (file) => createHash("sha256").update(readFileSync(file)).digest("hex");
 
 // --- the server -------------------------------------------------------------
-// The launcher tolerates an occupied port, and a stale server holding an older
-// project has produced a false failure before. Clear the port first.
+// A stale server holding an older project produced a false failure before.
+// Clear the dedicated test port before starting the launcher.
 function portOwners() {
   const found = spawnSync("lsof", ["-ti", `tcp:${port}`], { encoding: "utf8" });
   return (found.stdout || "")
@@ -102,12 +110,19 @@ const page = await browser.newPage();
 page.setDefaultTimeout(90000);
 await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
 const errors = [];
+const selectionDebug = [];
+await page.evaluateOnNewDocument(() => localStorage.setItem("hf-select-debug", "1"));
+page.on("console", (message) => {
+  if (message.text().includes("[hf-select]")) selectionDebug.push(message.text());
+});
 page.on("pageerror", (error) => errors.push(error.message));
 const report = {
   ok: false,
   mode,
   port,
   project,
+  suiteVersion: 2,
+  fixtureRevision: sha(join(fixtureDir, "scenes/headline-card.html")),
   checks: [],
   receipts: [],
   providerSpendUsd: 0,
@@ -121,8 +136,7 @@ const bridge = (name, input = {}) => {
 };
 /** Passive read of the last receipt. Allowed in both modes: it drives nothing. */
 const snapshot = () => page.evaluate(() => window.ariStudio.getSnapshot());
-const button = (name) => page.locator(`button::-p-text(${name})`);
-const fill = (label, value) => page.locator(`[aria-label="${label}"]`).fill(value);
+const { button, fill } = ariControls(page);
 
 /** Wait for a receipt NEWER than `minId`. Two writes of the same tool in a row
  * (a curve dragged, then typed) otherwise resolve on the first one's receipt and
@@ -260,13 +274,11 @@ async function readTool(name) {
  */
 async function readyWorkspace() {
   report.workspaceReloads = 0;
-  for (let reload = 0; reload <= 3; reload++) {
-    for (let attempt = 0; attempt < 20; attempt++) {
-      const look = await readTool("studio_look");
-      if ((look.scenes?.length ?? 0) >= 2) return look;
-      await new Promise((wait) => setTimeout(wait, 500));
-    }
-    if (reload === 3) break;
+  const maxReloads = workspaceReloadLimit();
+  for (let reload = 0; reload <= maxReloads; reload++) {
+    const look = await pollWorkspace();
+    if (look) return look;
+    if (reload === maxReloads) break;
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.waitForSelector('[aria-label="Tasot"] button');
     await watchReceipts();
@@ -473,6 +485,41 @@ try {
     "master 5,8 s on placement 2 wrote scene-local 0,3 s and reported both clocks",
   );
 
+  // Work on the selected occurrence while it is visible, as in the manual UX flow.
+  await fill("Aika sekunteina", "5,8");
+  await act("studio_seek", () => button("Siirry").click());
+  // The curve editor and frame sampler must keep the chosen occurrence too.
+  const nestedIndex = await motionIndexAt(0.3);
+  const nestedPanel = await page.$(`[aria-label="Liike ${nestedIndex} käyrä"]`);
+  assert(nestedPanel);
+  for (const [label, value] of Object.entries({ X1: 0.25, Y1: 0.9, X2: 0.4, Y2: 1 }))
+    await typeInto(nestedPanel, label, value);
+  const nestedCurve = await act("studio_update_animation", () =>
+    clickIn(nestedPanel, "Tallenna ohjauspisteet"),
+  );
+  assert.equal(nestedCurve.stage, "verified", JSON.stringify(nestedCurve));
+  assert.equal(nestedCurve.scene.instance, FIXTURE.hostB);
+  assert.equal(nestedCurve.scene.localPosition, 0.3);
+  assert.equal(nestedCurve.scene.masterPosition, 5.8);
+  await page.waitForFunction(
+    () =>
+      document.querySelector('[data-testid="ari-target"]')?.textContent === "Headline Card Offer",
+    { timeout: 10000 },
+  );
+  const restoredIndex = await motionIndexAt(0.3);
+  const freshPanel = await page.$(`[aria-label="Liike ${restoredIndex} käyrä"]`);
+  const nestedSamples = await act("studio_frame", () =>
+    clickIn(freshPanel, "Ruutukuvat 25/50/75 %"),
+  );
+  assert.equal(nestedSamples.ok, true, JSON.stringify(nestedSamples));
+  for (const [i, sample] of nestedSamples.frames.entries())
+    assert(Math.abs(sample.time - [5.95, 6.1, 6.25][i]) <= 1 / 30);
+  report.nestedCurve = nestedCurve;
+  report.nestedSamples = nestedSamples;
+  report.checks.push(
+    "nested curve and frame samples use the chosen occurrence at master 5.95/6.10/6.25 s",
+  );
+
   // 8. The bar on the MASTER rail, with the retiming named.
   await page.waitForFunction(() =>
     document
@@ -549,42 +596,11 @@ try {
   report.checks.push("1440x900 and 1280x800 both expose the layers, the dock and the timeline");
 
   // 12. Export through the UI download.
-  const cdp = await page.createCDPSession();
   const downloadDir = join(evidence, "downloads");
-  mkdirSync(downloadDir, { recursive: true });
-  await cdp.send("Browser.setDownloadBehavior", {
-    behavior: "allow",
-    downloadPath: downloadDir,
-    eventsEnabled: true,
-  });
-  const downloaded = new Promise((done, fail) => {
-    const timer = setTimeout(() => fail(new Error("download timed out")), 300000);
-    cdp.on("Browser.downloadProgress", (event) => {
-      if (event.state === "completed") {
-        clearTimeout(timer);
-        done(event);
-      } else if (event.state === "canceled") {
-        clearTimeout(timer);
-        fail(new Error("download canceled"));
-      }
-    });
-  });
-  await button("Vie video · MP4").click();
-  await page.waitForSelector('[aria-label="Videon vienti"] a[download]', { timeout: 300000 });
-  const filename = await page.$eval('[aria-label="Videon vienti"] a[download]', (e) => e.download);
-  await page.locator('[aria-label="Videon vienti"] a[download]').click();
-  report.downloadEvent = await downloaded;
-  const video = join(downloadDir, filename);
-  assert(existsSync(video));
-  const probe = spawnSync(
-    "ffprobe",
-    ["-v", "error", "-show_streams", "-show_format", "-of", "json", video],
-    {
-      encoding: "utf8",
-    },
-  );
-  assert.equal(probe.status, 0, probe.stderr);
-  const probed = JSON.parse(probe.stdout);
+  const { completed: downloadComplete } = await prepareDownload(page, downloadDir, 300000);
+  const { event, video } = await downloadExport(page, downloadDir, downloadComplete, 300000);
+  report.downloadEvent = event;
+  const probed = probeVideo(video);
   const stream = probed.streams.find((one) => one.codec_type === "video");
   const [num, den] = stream.avg_frame_rate.split("/").map(Number);
   report.video = {
@@ -615,7 +631,11 @@ try {
   const sibling = join(uatRoot, uiOnly ? "mixed" : "ui-only", "report.json");
   if (existsSync(sibling)) {
     const other = JSON.parse(readFileSync(sibling, "utf8"));
-    if (other.sceneHashes) {
+    if (
+      other.sceneHashes &&
+      other.suiteVersion === report.suiteVersion &&
+      other.fixtureRevision === report.fixtureRevision
+    ) {
       report.comparedWith = { mode: other.mode, sceneHashes: other.sceneHashes };
       assert.deepEqual(
         report.sceneHashes,
@@ -632,6 +652,13 @@ try {
 } catch (error) {
   report.error = error.stack;
   report.pageErrors = errors;
+  report.selectionDebug = selectionDebug;
+  report.previewDiagnostics = await Promise.all(
+    page.frames().map(async (frame) => ({
+      url: frame.url(),
+      body: await frame.evaluate(() => document.body.innerHTML).catch(() => "unavailable"),
+    })),
+  );
   try {
     await page.screenshot({ path: join(evidence, "failure.png") });
   } catch {}
@@ -682,11 +709,8 @@ function measureRate(video, framesDir) {
   const ENTRANCE = 0.9;
   const FPS = 30;
   const HOSTS = { a: { start: 0.12, rate: 1 }, b: { start: 5.6, rate: 1.5 } };
-  // Every offset stays strictly inside the entrance: `headline-card.html` is a
-  // 0,9 s composition, so past its own duration the card leaves the frame and
-  // there is nothing left to measure. (The fixture README's "then held" does not
-  // hold — see the sprint report.)
-  const OFFSETS = [0.3, 0.45, 0.6, 0.75];
+  // Include the completed entrance as well as its moving samples.
+  const OFFSETS = [0.3, 0.45, 0.6, 0.9];
   const frameIndex = (master) => Math.round(master * FPS);
 
   function band(index) {
@@ -718,23 +742,8 @@ function measureRate(video, framesDir) {
   }
   function topEdge(index) {
     const pixels = band(index);
-    let peak = 0;
-    const profile = new Array(BAND.h).fill(0);
-    for (let row = 0; row < BAND.h; row++) {
-      let best = 0;
-      const base = row * BAND.w * 3;
-      for (let col = 0; col < BAND.w; col++) {
-        const at = base + col * 3;
-        const deviation = Math.max(
-          Math.abs(pixels[at] - BG[0]),
-          Math.abs(pixels[at + 1] - BG[1]),
-          Math.abs(pixels[at + 2] - BG[2]),
-        );
-        if (deviation > best) best = deviation;
-      }
-      profile[row] = best;
-      if (best > peak) peak = best;
-    }
+    const profile = headlineProfile(pixels, BAND, BG);
+    const peak = Math.max(...profile);
     // Compression noise on the flat red field sits around 15; the headline is
     // 200+. A frame with no headline must be refused, never measured.
     if (peak < 60) throw new Error(`no headline in frame ${index} (peak ${peak})`);
@@ -801,23 +810,7 @@ function measureRate(video, framesDir) {
     });
   }
 
-  // Calibration-free: fit host A's own line top = intercept + slope x local. The
-  // entrance is linear by construction, so the slope must come out at the
-  // authored -TRAVEL/ENTRANCE px per second, and every other frame's local time
-  // is read off that fit. A single settled reference frame was fragile — the
-  // card is gone from the master after its own 0,9 s.
-  const fitFrom = samples.filter((one) => one.host === "a");
-  const n = fitFrom.length;
-  const sx = fitFrom.reduce((total, one) => total + one.expectedLocalSec, 0);
-  const sy = fitFrom.reduce((total, one) => total + one.topPx, 0);
-  const sxx = fitFrom.reduce((total, one) => total + one.expectedLocalSec ** 2, 0);
-  const sxy = fitFrom.reduce((total, one) => total + one.expectedLocalSec * one.topPx, 0);
-  const slope = (n * sxy - sx * sy) / (n * sxx - sx * sx);
-  const intercept = (sy - slope * sx) / n;
-  for (const one of samples) {
-    one.measuredLocalSec = Number(((one.topPx - intercept) / slope).toFixed(4));
-    one.deltaSec = Number((one.measuredLocalSec - one.expectedLocalSec).toFixed(4));
-  }
+  const { slope, intercept } = fitHeadlineTravel(samples, ENTRANCE);
 
   // The negative control: read host B as if it played at rate 1. Every offset
   // must then DISAGREE with host A, or "1,5x" would be unfalsifiable.
@@ -836,6 +829,11 @@ function measureRate(video, framesDir) {
       topDeltaPx: Math.abs(top(indexA) - top(indexNaive)),
     });
   }
+  const holds = [3.5, 6.9].map((master) => {
+    const index = frameIndex(master);
+    keep(index, `headline-hold-${master}.png`);
+    return { masterSec: master, topPx: top(index) };
+  });
   const tolerance = {
     matchedTopPx: 6,
     naiveTopPx: 10,
@@ -851,16 +849,67 @@ function measureRate(video, framesDir) {
     tolerance,
     samples,
     matchedPairs: pairs,
+    holds,
     naiveRate1Control: naive,
-    ok:
-      Math.abs(slope + TRAVEL / ENTRANCE) <= tolerance.slopePxPerSec &&
-      samples.every((one) => Math.abs(one.deltaSec) <= tolerance.localSec) &&
-      pairs.every((one) => one.topDeltaPx <= tolerance.matchedTopPx) &&
-      // Host A needed 1,5x the master seconds host B did to reach the same scene
-      // state, within the two frames the 30 fps grid can move a sample.
+    ok: [
+      Math.abs(slope + TRAVEL / ENTRANCE) <= tolerance.slopePxPerSec,
+      samples.every((one) => Math.abs(one.deltaSec) <= tolerance.localSec),
+      pairs.every((one) => one.topDeltaPx <= tolerance.matchedTopPx),
+      // Identical scene progress takes 1.5x as long in the first host; allow
+      // only the two-frame quantisation of the 30 fps export.
       pairs.every(
         (one) => Math.abs(one.aMasterElapsedSec - 1.5 * one.bMasterElapsedSec) <= 2 / FPS,
-      ) &&
+      ),
       naive.every((one) => one.topDeltaPx > tolerance.naiveTopPx),
+    ].every(Boolean),
   };
+}
+
+async function pollWorkspace() {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const look = await readTool("studio_look");
+    if (hasBothScenes(look)) return look;
+    await new Promise((wait) => setTimeout(wait, 500));
+  }
+  return null;
+}
+
+function headlineProfile(pixels, band, background) {
+  return Array.from({ length: band.h }, (_, row) => {
+    let best = 0;
+    const base = row * band.w * 3;
+    for (let col = 0; col < band.w; col++) {
+      const at = base + col * 3;
+      best = Math.max(
+        best,
+        ...background.map((channel, offset) => Math.abs(pixels[at + offset] - channel)),
+      );
+    }
+    return best;
+  });
+}
+
+function fitHeadlineTravel(samples, entrance) {
+  // Fit the moving samples only; the completed entrance is clamped at 0.9.
+  const fitFrom = samples.filter((one) => one.host === "a" && one.sceneOffsetSec < entrance);
+  const n = fitFrom.length;
+  const sx = fitFrom.reduce((total, one) => total + one.expectedLocalSec, 0);
+  const sy = fitFrom.reduce((total, one) => total + one.topPx, 0);
+  const sxx = fitFrom.reduce((total, one) => total + one.expectedLocalSec ** 2, 0);
+  const sxy = fitFrom.reduce((total, one) => total + one.expectedLocalSec * one.topPx, 0);
+  const slope = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+  const intercept = (sy - slope * sx) / n;
+  for (const one of samples) {
+    one.measuredLocalSec = Number(((one.topPx - intercept) / slope).toFixed(4));
+    one.deltaSec = Number((one.measuredLocalSec - one.expectedLocalSec).toFixed(4));
+  }
+
+  return { slope, intercept };
+}
+
+function workspaceReloadLimit() {
+  return Number(process.env.ARI_WORKSPACE_RELOADS || 0);
+}
+function hasBothScenes(look) {
+  return (look.scenes?.length ?? 0) >= 2;
 }

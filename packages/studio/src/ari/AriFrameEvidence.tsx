@@ -10,14 +10,8 @@ export function AriFrameEvidence({ call }: { call: AriCallReceipt | null }) {
   const [frame, setFrame] = useState<{ url: string; time: number; revision: string } | null>(null);
   useEffect(() => {
     if (call?.state !== "done" || call.tool !== "studio_frame") return;
-    const result = call.result;
-    if (typeof result !== "object" || result === null || Reflect.get(result, "ok") !== true) return;
-    const url: unknown = Reflect.get(result, "url"),
-      time: unknown = Reflect.get(result, "time");
-    if (typeof url !== "string" || typeof time !== "number") return;
-    const parsed = new URL(url, window.location.href);
-    if (parsed.origin !== window.location.origin || !parsed.pathname.startsWith("/api/")) return;
-    setFrame({ url, time, revision });
+    const captured = capturedFrame(call.result);
+    if (captured) setFrame({ ...captured, revision });
     // The revision belongs to capture completion; later edits must not re-bind it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [call]);
@@ -40,4 +34,17 @@ export function AriFrameEvidence({ call }: { call: AriCallReceipt | null }) {
       )}
     </div>
   );
+}
+
+function capturedFrame(result: unknown) {
+  if (typeof result !== "object" || result === null || Reflect.get(result, "ok") !== true)
+    return null;
+  const url: unknown = Reflect.get(result, "url"),
+    time: unknown = Reflect.get(result, "time");
+  if (typeof url !== "string" || typeof time !== "number") return null;
+  return safeFrameUrl(url) ? { url, time } : null;
+}
+function safeFrameUrl(url: string) {
+  const parsed = new URL(url, window.location.href);
+  return parsed.origin === window.location.origin && parsed.pathname.startsWith("/api/");
 }

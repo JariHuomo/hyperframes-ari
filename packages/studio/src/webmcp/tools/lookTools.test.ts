@@ -488,3 +488,18 @@ describe("buildStudioLook · scenes", () => {
     expect(look.scenes).toEqual([]);
   });
 });
+
+it("keeps both scene placements on the shelf while runtime timing hides them", () => {
+  document.body.innerHTML = `<main data-composition-id="master">
+    <section data-composition-id="a" data-composition-file="scenes/title.html" style="visibility:hidden">
+      <h1 class="headline" data-hf-id="title" style="visibility:hidden">Headline</h1>
+    </section>
+    <section data-composition-id="b" data-composition-file="scenes/title.html" style="display:none">
+      <h1 class="headline" data-hf-id="title" style="display:none">Headline</h1>
+    </section>
+  </main>`;
+  const scene = collectStudioLookScene(document, "index.html", null);
+  expect(scene.status).toBe("ready");
+  if (scene.status !== "ready") throw new Error("missing scene");
+  expect(scene.items.filter((item) => item.hfId === "title")).toHaveLength(2);
+});

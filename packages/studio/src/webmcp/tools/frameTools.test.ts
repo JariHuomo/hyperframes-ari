@@ -247,3 +247,50 @@ describe("studioFrame samples", () => {
     expect(result.time).toBe(2.4);
   });
 });
+
+describe("nested frame samples", () => {
+  const sourceFile = "scenes/title.html";
+  function nestedDeps() {
+    return sampleDeps([{ id: "nested", position: 0.3, duration: 0.9 }], {
+      getCurrentSelection: () => ({ sourceFile }) as never,
+      getClipManifest: () => [
+        {
+          id: "a",
+          kind: "composition",
+          compositionId: "a",
+          compositionSrc: sourceFile,
+          start: 0.12,
+          duration: 5.48,
+          playbackRate: 1,
+        },
+        {
+          id: "b",
+          kind: "composition",
+          compositionId: "b",
+          compositionSrc: sourceFile,
+          start: 5.6,
+          duration: 1.4,
+          playbackRate: 1.5,
+        },
+      ],
+    });
+  }
+  it("samples the chosen occurrence in master time", async () => {
+    const result = expectOk<StudioFrameResult>(
+      await studioFrame(nestedDeps(), {
+        animationId: "nested",
+        instance: "b",
+        samples: [0.25, 0.5, 0.75],
+      }),
+    );
+    result.frames?.forEach((frame, i) => expect(frame.time).toBeCloseTo([5.95, 6.1, 6.25][i]!, 6));
+  });
+  it("refuses ambiguous occurrences before capturing", async () => {
+    const deps = nestedDeps();
+    const probe = vi.spyOn(deps, "probeFrame");
+    expect(
+      expectFailure(await studioFrame(deps, { animationId: "nested", samples: [0.5] })).kind,
+    ).toBe("invalid");
+    expect(probe).not.toHaveBeenCalled();
+  });
+});

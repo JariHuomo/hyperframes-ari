@@ -383,7 +383,7 @@ export function useDomSelection({
         return;
       }
 
-      const nextSelection = await buildDomSelectionFromTarget(element);
+      const nextSelection = await buildDomSelectionFromTarget(element, { exactTarget: true });
       if (nextSelection) {
         applyDomSelection(nextSelection, {
           revealPanel: false,
@@ -410,7 +410,7 @@ export function useDomSelection({
       for (const selection of selections) {
         const element = findElementForSelection(doc, selection, activeCompPath);
         if (!element) continue;
-        const nextSelection = await buildDomSelectionFromTarget(element);
+        const nextSelection = await buildDomSelectionFromTarget(element, { exactTarget: true });
         if (nextSelection) nextGroup.push(nextSelection);
       }
       if (nextGroup.length === 0) return;

@@ -162,19 +162,11 @@ function MotionForm({
 }) {
   // A parsed position can be a relative label ("<0.5"); only a number has a
   // master-time twin, which is exactly the `supported` case below.
-  const initial = animation?.position ?? usePlayerStore.getState().currentTime;
-  const initialSeconds = typeof initial === "number" ? initial : Number.NaN;
-  const [position, setPosition] = useState(String(initial));
-  // S3: the same instant in master time. Kept as its own text field so a human
-  // can type either one; whichever is edited derives the other through the
-  // selected instance, so the two can never describe different moments.
-  const [master, setMaster] = useState(
-    instance && Number.isFinite(initialSeconds)
-      ? String(roundMotionSeconds(masterFromLocal(instance, initialSeconds)))
-      : String(initial),
-  );
-  const [duration, setDuration] = useState(String(animation?.duration ?? 0.45));
-  const [ease, setEase] = useState(motionEase(animation) ?? "power2.out");
+  const initial = initialMotionTimes(animation, instance);
+  const [position, setPosition] = useState(initial.local);
+  const [master, setMaster] = useState(initial.master);
+  const [duration, setDuration] = useState(initial.duration);
+  const [ease, setEase] = useState(initial.ease);
   const [preset, setPreset] = useState("fade");
   const [error, setError] = useState("");
   const stopPreview = useRef<(() => void) | null>(null);
@@ -194,13 +186,8 @@ function MotionForm({
     }
   }
   function previewMotion() {
-    if (!animation || typeof animation.position !== "number") return;
     stopPreview.current?.();
-    // One pass of this tween's own span; "Vertaa edelliseen" runs the same
-    // helper twice. A nested motion is played in MASTER time — the player has
-    // no other clock — so the span is converted through the instance first.
-    const local = { position: animation.position, duration: animation.duration ?? 0 };
-    const span = instance ? motionReplaySpan(instance, local.position, local.duration) : local;
+    const span = animationReplaySpan(animation, instance);
     if (!span) {
       setError("Liike ei näy tässä esiintymässä.");
       return;
@@ -210,20 +197,14 @@ function MotionForm({
   const supported = !animation || typeof animation.position === "number";
   // The curve panel replays the same span, so it needs it in the same clock the
   // player understands: master time for a nested motion.
-  const replaySpan =
-    animation && typeof animation.position === "number"
-      ? instance
-        ? motionReplaySpan(instance, animation.position, animation.duration ?? 0)
-        : { position: animation.position, duration: animation.duration ?? 0 }
-      : null;
+  const replaySpan = animationReplaySpan(animation, instance);
   async function save() {
     const p = ariNumber(position),
       d = ariNumber(duration);
     // A nested motion's bounds belong to the scene, not the master composition:
     // the tool re-checks them against the host window (S5) and refuses in
     // Finnish, so the client only screens out plainly unusable numbers.
-    const overruns = !instance && p + d > usePlayerStore.getState().duration;
-    if (!Number.isFinite(p) || !Number.isFinite(d) || p < 0 || d <= 0 || overruns) {
+    if (!validMotionNumbers(p, d, instance)) {
       setError("Anna alku ja kesto videon sisältä.");
       return;
     }
@@ -232,17 +213,7 @@ function MotionForm({
     // write has been read back from source.
     const result = await bridge.call(
       animation ? "studio_update_animation" : "studio_add_animation",
-      {
-        handle,
-        ...(animation ? { animationId: animation.id } : { method: "from", preset }),
-        // Always the scene's own clock on the wire: that is what lands in the
-        // scene file. The master field above is a view of it, not a second
-        // source of truth.
-        position: p,
-        duration: d,
-        ...(instance ? { instance: instance.hostId, timeBasis: "scene" as const } : {}),
-        [animation ? motionEaseKey(animation) : "ease"]: ease,
-      },
+      motionRequest({ handle, animation, instance, position: p, duration: d, preset, ease }),
     );
     if (typeof result === "object" && result !== null && Reflect.get(result, "ok") === false)
       setError(String(Reflect.get(result, "reason")));
@@ -255,64 +226,21 @@ function MotionForm({
         void save();
       }}
     >
-      {animation ? (
-        <p className="text-sm">
-          Liike {index + 1} · {animation.method}{" "}
-          {animation.hasOwnProperty("keyframes") ? "· avainruudut" : ""}
-        </p>
-      ) : (
-        <label className="block text-xs">
-          Liikevalinta
-          <select
-            aria-label="Liikevalinta"
-            className={ariInput}
-            value={preset}
-            onChange={(e) => setPreset(e.target.value)}
-          >
-            <option value="fade">Häivytys</option>
-            <option value="slide">Liu’u sisään alhaalta</option>
-            <option value="grow">Kasva paikalleen</option>
-          </select>
-        </label>
-      )}
+      <MotionKind animation={animation} index={index} preset={preset} setPreset={setPreset} />
       {!supported ? (
         <p className="text-xs">Mukautettu ajoitus: avaa tarkat työkalut.</p>
       ) : (
         <>
-          {instance && (
-            <p className="text-xs text-neutral-300">
-              Alkaa kohtauksessa {formatSceneSeconds(ariNumber(position) || 0)} s · pääajassa{" "}
-              {formatSceneSeconds(ariNumber(master) || 0)} s
-              {instance.playbackRate !== 1 ? ` · ${formatPlaybackRate(instance.playbackRate)}` : ""}
-            </p>
-          )}
-          <div className="grid grid-cols-2 gap-2">
-            <AriNumber
-              label={
-                animation
-                  ? `Liike ${index + 1} alkaa ${instance ? "kohtauksessa " : ""}(s)`
-                  : `Uusi liike alkaa ${instance ? "kohtauksessa " : ""}(s)`
-              }
-              value={position}
-              onChange={editLocal}
-            />
-            {instance && (
-              <AriNumber
-                label={
-                  animation
-                    ? `Liike ${index + 1} alkaa pääajassa (s)`
-                    : "Uusi liike alkaa pääajassa (s)"
-                }
-                value={master}
-                onChange={editMaster}
-              />
-            )}
-            <AriNumber
-              label={animation ? `Liike ${index + 1} kesto (s)` : "Uusi liike kesto (s)"}
-              value={duration}
-              onChange={setDuration}
-            />
-          </div>
+          <MotionTimingFields
+            prefix={animation ? `Liike ${index + 1}` : "Uusi liike"}
+            instance={instance}
+            position={position}
+            master={master}
+            duration={duration}
+            editLocal={editLocal}
+            editMaster={editMaster}
+            setDuration={setDuration}
+          />
           <AriEasePicker
             label={animation ? `Liike ${index + 1} tuntuma` : "Uuden liikkeen tuntuma"}
             value={ease}
@@ -324,11 +252,107 @@ function MotionForm({
           </button>
         </>
       )}
-      {animation && supported && (
+      <MotionExtras
+        animation={animation}
+        supported={supported}
+        bridge={bridge}
+        handle={handle}
+        busy={busy}
+        instance={instance}
+        index={index}
+        replaySpan={replaySpan}
+        previewMotion={previewMotion}
+      />
+      {error && (
+        <p role="alert" className="text-sm text-amber-300">
+          {error}
+        </p>
+      )}
+    </form>
+  );
+}
+
+function MotionTimingFields({
+  prefix,
+  instance,
+  position,
+  master,
+  duration,
+  editLocal,
+  editMaster,
+  setDuration,
+}: {
+  prefix: string;
+  instance: SceneInstance | null;
+  position: string;
+  master: string;
+  duration: string;
+  editLocal: (value: string) => void;
+  editMaster: (value: string) => void;
+  setDuration: (value: string) => void;
+}) {
+  return (
+    <>
+      {" "}
+      {instance && (
+        <p className="text-xs text-neutral-300">
+          Alkaa kohtauksessa {formatSceneSeconds(ariNumber(position) || 0)} s · pääajassa{" "}
+          {formatSceneSeconds(ariNumber(master) || 0)} s
+          {instance.playbackRate !== 1 ? ` · ${formatPlaybackRate(instance.playbackRate)}` : ""}
+        </p>
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        <AriNumber
+          label={`${prefix} alkaa ${instance ? "kohtauksessa " : ""}(s)`}
+          value={position}
+          onChange={editLocal}
+        />
+        {instance && (
+          <AriNumber label={`${prefix} alkaa pääajassa (s)`} value={master} onChange={editMaster} />
+        )}
+        <AriNumber label={`${prefix} kesto (s)`} value={duration} onChange={setDuration} />
+      </div>
+    </>
+  );
+}
+
+function animationReplaySpan(animation: GsapAnimation | undefined, instance: SceneInstance | null) {
+  if (!animation || typeof animation.position !== "number") return null;
+  const local = { position: animation.position, duration: animation.duration ?? 0 };
+  return instance ? motionReplaySpan(instance, local.position, local.duration) : local;
+}
+
+function MotionExtras({
+  animation,
+  supported,
+  bridge,
+  handle,
+  busy,
+  instance,
+  index,
+  replaySpan,
+  previewMotion,
+}: {
+  animation?: GsapAnimation;
+  supported: boolean;
+  bridge: AriAgentBridge;
+  handle: string;
+  busy: boolean;
+  instance: SceneInstance | null;
+  index: number;
+  replaySpan: { position: number; duration: number } | null;
+  previewMotion: () => void;
+}) {
+  if (!animation) return null;
+  return (
+    <>
+      {" "}
+      {supported && (
         <AriEase
           bridge={bridge}
           handle={handle}
           animationId={animation.id}
+          instance={instance?.hostId}
           ease={motionEase(animation) ?? "power2.out"}
           busy={busy}
           index={index}
@@ -336,33 +360,105 @@ function MotionForm({
           duration={replaySpan?.duration}
         />
       )}
-      {animation && (
-        <div className="flex gap-2">
-          <button
-            type="button"
-            className={ariButton}
-            disabled={busy || !supported}
-            onClick={previewMotion}
-          >
-            Toista liike {index + 1}
-          </button>
-          <button
-            type="button"
-            className={ariButton}
-            disabled={busy}
-            onClick={() =>
-              void bridge.call("studio_delete_animation", { handle, animationId: animation.id })
-            }
-          >
-            Poista liike {index + 1}
-          </button>
-        </div>
-      )}
-      {error && (
-        <p role="alert" className="text-sm text-amber-300">
-          {error}
-        </p>
-      )}
-    </form>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          className={ariButton}
+          disabled={busy || !supported}
+          onClick={previewMotion}
+        >
+          Toista liike {index + 1}
+        </button>
+        <button
+          type="button"
+          className={ariButton}
+          disabled={busy}
+          onClick={() =>
+            void bridge.call("studio_delete_animation", { handle, animationId: animation.id })
+          }
+        >
+          Poista liike {index + 1}
+        </button>
+      </div>
+    </>
+  );
+}
+
+function validMotionNumbers(position: number, duration: number, instance: SceneInstance | null) {
+  if (![position, duration].every(Number.isFinite)) return false;
+  if (position < 0 || duration <= 0) return false;
+  return Boolean(instance) || position + duration <= usePlayerStore.getState().duration;
+}
+function motionRequest({
+  handle,
+  animation,
+  instance,
+  position,
+  duration,
+  preset,
+  ease,
+}: {
+  handle: string;
+  animation?: GsapAnimation;
+  instance: SceneInstance | null;
+  position: number;
+  duration: number;
+  preset: string;
+  ease: string;
+}) {
+  return {
+    handle,
+    position,
+    duration,
+    ...(animation ? { animationId: animation.id } : { method: "from", preset }),
+    ...(instance ? { instance: instance.hostId, timeBasis: "scene" as const } : {}),
+    [motionEaseKey(animation)]: ease,
+  };
+}
+
+function initialMotionTimes(animation: GsapAnimation | undefined, instance: SceneInstance | null) {
+  const value = animation?.position ?? usePlayerStore.getState().currentTime;
+  const local = String(value);
+  const defaults = {
+    duration: String(animation?.duration ?? 0.45),
+    ease: motionEase(animation) ?? "power2.out",
+  };
+  if (!instance || typeof value !== "number") return { ...defaults, local, master: local };
+  return {
+    ...defaults,
+    local,
+    master: String(roundMotionSeconds(masterFromLocal(instance, value))),
+  };
+}
+function MotionKind({
+  animation,
+  index,
+  preset,
+  setPreset,
+}: {
+  animation?: GsapAnimation;
+  index: number;
+  preset: string;
+  setPreset: (value: string) => void;
+}) {
+  return animation ? (
+    <p className="text-sm">
+      Liike {index + 1} · {animation.method}{" "}
+      {animation.hasOwnProperty("keyframes") ? "· avainruudut" : ""}
+    </p>
+  ) : (
+    <label className="block text-xs">
+      Liikevalinta
+      <select
+        aria-label="Liikevalinta"
+        className={ariInput}
+        value={preset}
+        onChange={(e) => setPreset(e.target.value)}
+      >
+        <option value="fade">Häivytys</option>
+        <option value="slide">Liu’u sisään alhaalta</option>
+        <option value="grow">Kasva paikalleen</option>
+      </select>
+    </label>
   );
 }

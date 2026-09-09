@@ -50,8 +50,6 @@ export function AriMotionBar({
   /** The resolved scene placement, or null for a motion in the open composition. */
   instance?: SceneInstance | null;
 }) {
-  const position = typeof animation.position === "number" ? animation.position : null;
-  const length = animation.duration ?? 0;
   const rail = useRef<HTMLDivElement>(null);
   const drag = useRef<{
     x: number;
@@ -61,24 +59,9 @@ export function AriMotionBar({
     resize: boolean;
   } | null>(null);
   const [draft, setDraft] = useState<{ position: number; length: number } | null>(null);
-  if (position === null || duration <= 0) return null;
-
-  // Everything below the conversion is master time — including the drag maths,
-  // so a pixel always means the same second whatever the instance's rate is.
-  const span = instance ? motionMasterSpan(instance, position, length) : null;
-  const masterPosition = span ? span.position : position;
-  const masterLength = span ? span.duration : length;
-  const p = draft?.position ?? masterPosition;
-  const d = draft?.length ?? masterLength;
-  // The bar carries the curve's glyph as well as its span: an agent scanning
-  // the timeline should see WHICH feel a motion has without opening its form.
-  const ease = animation.keyframes?.easeEach ?? animation.ease ?? "none";
-  const rate =
-    instance && instance.playbackRate !== 1 ? formatPlaybackRate(instance.playbackRate) : null;
-  const label = instance
-    ? `Liike ${index + 1} · kohtaus ${position.toFixed(2)}–${(position + length).toFixed(2)} s · pääaika ${p.toFixed(2)}–${(p + d).toFixed(2)} s`
-    : `Liike ${index + 1} · ${p.toFixed(2)}–${(p + d).toFixed(2)} s`;
-  const title = span?.reason ? `Ei mahdu näkyviin: ${span.reason}` : `Käyrä: ${ease}`;
+  const view = motionBarView(animation, instance, draft, duration, index);
+  if (!view) return null;
+  const { span, masterPosition, masterLength, p, d, ease, rate, label, title } = view;
 
   function commit(nextPosition: number, nextLength: number) {
     // The write goes into the scene's own file, so master time is converted
@@ -181,4 +164,72 @@ export function AriMotionBar({
       </div>
     </div>
   );
+}
+
+function motionBarView(
+  animation: GsapAnimation,
+  instance: SceneInstance | null,
+  draft: { position: number; length: number } | null,
+  duration: number,
+  index: number,
+) {
+  const position = typeof animation.position === "number" ? animation.position : null;
+  const length = animation.duration ?? 0;
+  if (position === null || duration <= 0) return null;
+
+  // Everything below the conversion is master time — including the drag maths,
+  // so a pixel always means the same second whatever the instance's rate is.
+  const span = instance ? motionMasterSpan(instance, position, length) : null;
+  const { masterPosition, masterLength, p, d } = barGeometry(span, position, length, draft);
+  // The bar carries the curve's glyph as well as its span: an agent scanning
+  // the timeline should see WHICH feel a motion has without opening its form.
+  const { ease, rate, label, title } = motionBarLabels(
+    animation,
+    instance,
+    span?.reason,
+    position,
+    length,
+    p,
+    d,
+    index,
+  );
+
+  return { span, masterPosition, masterLength, p, d, ease, rate, label, title };
+}
+
+function motionBarLabels(
+  animation: GsapAnimation,
+  instance: SceneInstance | null,
+  reason: string | null | undefined,
+  position: number,
+  length: number,
+  p: number,
+  d: number,
+  index: number,
+) {
+  const ease = animation.keyframes?.easeEach ?? animation.ease ?? "none";
+  const rate =
+    instance && instance.playbackRate !== 1 ? formatPlaybackRate(instance.playbackRate) : null;
+  const label = instance
+    ? `Liike ${index + 1} · kohtaus ${position.toFixed(2)}–${(position + length).toFixed(2)} s · pääaika ${p.toFixed(2)}–${(p + d).toFixed(2)} s`
+    : `Liike ${index + 1} · ${p.toFixed(2)}–${(p + d).toFixed(2)} s`;
+  const title = reason ? `Ei mahdu näkyviin: ${reason}` : `Käyrä: ${ease}`;
+
+  return { ease, rate, label, title };
+}
+
+function barGeometry(
+  span: ReturnType<typeof motionMasterSpan> | null,
+  position: number,
+  length: number,
+  draft: { position: number; length: number } | null,
+) {
+  const masterPosition = span ? span.position : position;
+  const masterLength = span ? span.duration : length;
+  return {
+    masterPosition,
+    masterLength,
+    p: draft?.position ?? masterPosition,
+    d: draft?.length ?? masterLength,
+  };
 }

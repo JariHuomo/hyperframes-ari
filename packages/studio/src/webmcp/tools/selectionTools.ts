@@ -117,6 +117,24 @@ export async function studioSelect(
  * not a placement of THIS scene is refused rather than remembered — and the
  * choice is panel state only, so it can never redirect a write on its own.
  */
+function explicitInstance(
+  described: SceneDescription,
+  sourceFile: string,
+  instance: unknown,
+): string | ToolFailure {
+  if (typeof instance !== "string" || !instance.trim()) {
+    return toolFailure("invalid", "instance on oltava kohtauksen esiintymän hfId");
+  }
+  if (!described.instances.some((candidate) => candidate.hostId === instance)) {
+    return toolFailure(
+      "invalid",
+      `kohtauksella ${sourceFile} ei ole esiintymää ${instance}`,
+      `Esiintymät: ${described.instances.map((candidate) => candidate.hostId).join(", ") || "ei yhtään"}.`,
+    );
+  }
+  return instance;
+}
+
 function resolveSelectedInstance(
   deps: SelectionToolDeps,
   selection: DomEditSelection,
@@ -129,23 +147,8 @@ function resolveSelectedInstance(
   const sourceFile = sceneSourceFile(deps, selection);
   const described = describeScene(deps, sourceFile);
   if (!described) return null;
-  let chosen = sceneInstanceChoice.forSource(sourceFile);
-  if (instance !== undefined && instance !== null) {
-    if (typeof instance !== "string" || !instance.trim()) {
-      return toolFailure("invalid", "instance on oltava kohtauksen esiintymän hfId");
-    }
-    if (!described.instances.some((candidate) => candidate.hostId === instance)) {
-      return toolFailure(
-        "invalid",
-        `kohtauksella ${sourceFile} ei ole esiintymää ${instance}`,
-        `Esiintymät: ${described.instances.map((candidate) => candidate.hostId).join(", ") || "ei yhtään"}.`,
-      );
-    }
-    chosen = instance;
-  } else if (!chosen && described.instances.length === 1) {
-    // One placement is unambiguous, so it selects itself. Several never do.
-    chosen = described.instances[0]!.hostId;
-  }
+  const chosen = selectedSceneInstance(described, sourceFile, instance);
+  if (chosen !== null && typeof chosen !== "string") return chosen;
   sceneInstanceChoice.choose(sourceFile, chosen);
   return { ...described, instance: chosen };
 }
@@ -264,3 +267,17 @@ export const STUDIO_SEEK_DESCRIPTION = [
   "for where it actually landed rather than assuming it matched your request.",
   "Returns `ok: true`, or `ok: false` with `kind`, `reason` and a `hint`.",
 ].join(" ");
+
+function selectedSceneInstance(described: SceneDescription, sourceFile: string, instance: unknown) {
+  let chosen = sceneInstanceChoice.forSource(sourceFile);
+  if (instance !== undefined && instance !== null) {
+    const validated = explicitInstance(described, sourceFile, instance);
+    if (typeof validated !== "string") return validated;
+    chosen = validated;
+  } else if (!chosen && described.instances.length === 1) {
+    // One placement is unambiguous, so it selects itself. Several never do.
+    chosen = described.instances[0]!.hostId;
+  }
+
+  return chosen;
+}

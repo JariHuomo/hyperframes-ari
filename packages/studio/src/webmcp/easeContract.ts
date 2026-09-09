@@ -96,10 +96,10 @@ function customEase(ease: string): ParsedEase | null {
   const numbers = [raw[1], raw[2], raw[3], raw[4]].map((value) => Number.parseFloat(value ?? ""));
   if (!numbers.every(Number.isFinite)) return fail("Käyrän ohjauspisteet eivät ole lukuja.");
   const [x1, y1, x2, y2] = numbers as [number, number, number, number];
-  if (x1 < 0 || x1 > 1 || x2 < 0 || x2 > 1) {
+  if (![x1, x2].every((x) => x >= 0 && x <= 1)) {
     return fail("Käyrän X-ohjauspisteiden on oltava välillä 0–1.");
   }
-  if (y1 < CUSTOM_Y_MIN || y1 > CUSTOM_Y_MAX || y2 < CUSTOM_Y_MIN || y2 > CUSTOM_Y_MAX) {
+  if (![y1, y2].every((y) => y >= CUSTOM_Y_MIN && y <= CUSTOM_Y_MAX)) {
     return fail(`Käyrän Y-ohjauspisteiden on oltava välillä ${CUSTOM_Y_MIN}–${CUSTOM_Y_MAX}.`);
   }
   // Normalisation, not correction: the points are already inside the clamp

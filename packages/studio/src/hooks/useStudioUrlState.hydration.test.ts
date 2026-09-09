@@ -17,7 +17,11 @@ describe("restoring a selection from the URL", () => {
     }
     const probed: (boolean | undefined)[] = [];
     const buildDomSelection = vi.fn(
-      async (element: HTMLElement, options?: { skipSourceProbe?: boolean }) => {
+      async (
+        element: HTMLElement,
+        options?: { skipSourceProbe?: boolean; exactTarget?: boolean },
+      ) => {
+        expect(options?.exactTarget).toBe(true);
         probed.push(options?.skipSourceProbe);
         return { element, id: element.id } as never;
       },

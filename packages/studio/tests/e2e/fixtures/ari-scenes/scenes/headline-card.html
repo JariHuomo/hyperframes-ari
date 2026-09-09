@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="fi">
+  <head>
+    <meta charset="utf-8" />
+    <title>Testikauppa — otsikkokortti</title>
+    <style>
+      @font-face {
+        font-family: Archivo;
+        src: url("../assets/fonts/archivo-latin.woff2") format("woff2");
+        font-weight: 100 900;
+      }
+      #headline-card-root {
+        position: relative;
+        width: 935px;
+        height: 376px;
+        overflow: visible;
+        font-family: Archivo, sans-serif;
+      }
+      #headline-card-root .hc-headline {
+        position: absolute;
+        left: 0;
+        top: 0;
+        margin: 0;
+        width: 935px;
+        height: 138px;
+        font-size: 76px;
+        line-height: 1.12;
+        letter-spacing: -6px;
+        font-weight: 900;
+        color: #fff7eb;
+      }
+      #headline-card-root .hc-offer {
+        position: absolute;
+        left: 0;
+        top: 164px;
+        width: 935px;
+        height: 212px;
+        display: flex;
+        align-items: baseline;
+        gap: 27px;
+        color: #fff7eb;
+      }
+      #headline-card-root .hc-quantity {
+        font-size: 107px;
+        font-weight: 800;
+        letter-spacing: -5px;
+      }
+      #headline-card-root .hc-slash {
+        font-size: 98px;
+        font-weight: 400;
+      }
+      #headline-card-root .hc-price {
+        font-size: 206px;
+        font-weight: 900;
+        line-height: 1;
+        letter-spacing: -12px;
+      }
+    </style>
+  </head>
+  <body>
+    <section
+      id="headline-card-root"
+      data-hf-id="headline-card-root"
+      data-composition-id="headline-card"
+      data-width="935"
+      data-height="376"
+      data-start="0"
+      data-duration="7"
+      data-layout-allow-overflow=""
+      data-no-timeline=""
+    >
+      <h1 class="hc-headline" data-hf-id="headline-card-headline">Kuusi herkkua mukaan.</h1>
+      <div class="hc-offer" data-hf-id="headline-card-offer" aria-label="6 kappaletta 3 euroa">
+        <span class="hc-quantity" data-hf-id="headline-card-quantity">6 kpl</span
+        ><span class="hc-slash" data-hf-id="headline-card-slash">/</span
+        ><span class="hc-price" data-hf-id="headline-card-price">3 €</span>
+      </div>
+    </section>
+    <script>
+      // Built-in entrance: rise + fade, 0 -> 0.9 s of SCENE time.
+      // ease: 'none' on purpose. This scene is hosted twice, the second host at
+      // data-playback-rate="1.5", and the fixture's whole point is that scene time is
+      // readable from the frame. A linear ramp makes the translateY a direct readout
+      // of local time (y = 90 * (1 - local / 0.9)), so a frame pair proves the rate
+      // numerically instead of by eye.
+      var tl = gsap.timeline({ paused: true });
+      tl.fromTo(
+        ".hc-headline",
+        { y: 90, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.9, ease: "none" },
+        0,
+      );
+      // The offer block fades only. Travelling it 90 px down puts '3 €' past the red
+      // field's lower edge mid-entrance, which the layout gate reports as occluded text.
+      tl.fromTo(".hc-offer", { opacity: 0 }, { opacity: 1, duration: 0.9, ease: "none" }, 0);
+      // Hold the authored scene for the entire longest host window.
+      tl.set("#headline-card-root", {}, 7);
+      window.__timelines = window.__timelines || {};
+      window.__timelines["headline-card"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

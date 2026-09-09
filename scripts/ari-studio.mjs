@@ -17,17 +17,26 @@ import { parseArgs } from "node:util";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // Ari: resolve an existing Bun, including an npx-cached install, without downloading.
+function bunExecutablePath(executable) {
+  try {
+    const path = execFileSync(executable, ["-e", "process.stdout.write(process.execPath)"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return path && existsSync(path) ? path : null;
+  } catch {
+    return null;
+  }
+}
 function resolveBun() {
   for (const executable of [process.env.npm_execpath, join(homedir(), ".bun/bin/bun"), "bun"]) {
     if (!executable) continue;
-    try {
-      const path = execFileSync(executable, ["-e", "process.stdout.write(process.execPath)"], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-      }).trim();
-      if (path && existsSync(path)) return path;
-    } catch {}
+    const path = bunExecutablePath(executable);
+    if (path) return path;
   }
+  return npxBunPath();
+}
+function npxBunPath() {
   try {
     return execFileSync(
       "npx",

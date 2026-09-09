@@ -141,7 +141,7 @@ function manifestOf(deps: SceneToolDeps): { clips: readonly SceneTimeManifestCli
 }
 
 /** Human label for one placement: `title-host-b (pääajassa 4,00–8,00 s)`. */
-export function describeInstance(instance: SceneInstance): string {
+function describeInstance(instance: SceneInstance): string {
   return `${instance.hostId} (pääajassa ${formatSceneSeconds(instance.visibleStart)}–${formatSceneSeconds(instance.visibleEnd)} s)`;
 }
 
@@ -283,6 +283,21 @@ const ROOT_ONLY_BASIS = toolFailure("invalid", "timeBasis scene koskee vain sis�
  * provider is called. Returns the local position to write plus the receipt, or
  * a Finnish refusal.
  */
+function resolveRootWrite(
+  request: SceneWriteRequest,
+  basis: SceneTimeBasis | undefined,
+  instanceId: string | null,
+): SceneWriteResolution {
+  if (instanceId) {
+    return toolFailure("invalid", "instance koskee vain sisäkkäistä kohtausta");
+  }
+  if (basis === "scene") return ROOT_ONLY_BASIS;
+  if (request.position + request.duration > request.compositionDuration) {
+    return toolFailure("invalid", "motion must fit within the composition");
+  }
+  return { ok: true, scene: null, localPosition: null };
+}
+
 export function resolveSceneWrite(
   deps: SceneToolDeps,
   selection: SceneSelectionLike,
@@ -294,16 +309,7 @@ export function resolveSceneWrite(
   if (isFailure(instanceId)) return instanceId;
 
   const sourceFile = sceneSourceFile(deps, selection);
-  if (!isNestedSource(deps, selection)) {
-    if (instanceId) {
-      return toolFailure("invalid", "instance koskee vain sisäkkäistä kohtausta");
-    }
-    if (basis === "scene") return ROOT_ONLY_BASIS;
-    if (request.position + request.duration > request.compositionDuration) {
-      return toolFailure("invalid", "motion must fit within the composition");
-    }
-    return { ok: true, scene: null, localPosition: null };
-  }
+  if (!isNestedSource(deps, selection)) return resolveRootWrite(request, basis, instanceId);
 
   const effectiveBasis: SceneTimeBasis = basis ?? "scene";
   const { instances, unsupported } = resolveSceneInstances(manifestOf(deps), sourceFile);
@@ -330,21 +336,8 @@ export function resolveSceneWrite(
   const chosen = chooseInstance(sourceFile, instances, instanceId);
   if (isFailure(chosen)) return chosen;
 
-  let localPosition: number;
-  if (effectiveBasis === "master") {
-    if (
-      request.position < chosen.visibleStart - EPSILON ||
-      request.position > chosen.visibleEnd + EPSILON
-    ) {
-      return toolFailure(
-        "invalid",
-        `pääajan kohta ${formatSceneSeconds(request.position)} s ei osu esiintymään ${chosen.hostId} (näkyy ${formatSceneSeconds(chosen.visibleStart)}–${formatSceneSeconds(chosen.visibleEnd)} s)`,
-      );
-    }
-    localPosition = roundSeconds(masterToLocal(chosen, request.position));
-  } else {
-    localPosition = roundSeconds(request.position);
-  }
+  const localPosition = writeLocalPosition(chosen, effectiveBasis, request.position);
+  if (isFailure(localPosition)) return localPosition;
 
   const fit = validateSceneFit(chosen, localPosition, request.duration);
   if (fit) return fit;
@@ -509,3 +502,24 @@ export const SCENE_INSTANCE_SCHEMA = {
   description:
     "The host hfId of one placement of a nested scene, from studio_look scenes[]. Required when the scene appears more than once; never guessed.",
 } as const;
+
+function writeLocalPosition(
+  chosen: SceneInstance,
+  basis: SceneTimeBasis,
+  position: number,
+): number | ToolFailure {
+  let localPosition: number;
+  if (basis === "master") {
+    if (position < chosen.visibleStart - EPSILON || position > chosen.visibleEnd + EPSILON) {
+      return toolFailure(
+        "invalid",
+        `pääajan kohta ${formatSceneSeconds(position)} s ei osu esiintymään ${chosen.hostId} (näkyy ${formatSceneSeconds(chosen.visibleStart)}–${formatSceneSeconds(chosen.visibleEnd)} s)`,
+      );
+    }
+    localPosition = roundSeconds(masterToLocal(chosen, position));
+  } else {
+    localPosition = roundSeconds(position);
+  }
+
+  return localPosition;
+}

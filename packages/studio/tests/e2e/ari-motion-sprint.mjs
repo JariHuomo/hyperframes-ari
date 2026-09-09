@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+import { ariControls, prepareDownload, probeVideo, downloadExport } from "./ariBrowserEvidence.mjs";
 /** Real local UI + bridge acceptance, frozen prototype, no provider calls. */
 import assert from "node:assert/strict";
-import { mkdirSync, cpSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, cpSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -39,8 +40,7 @@ page.on("pageerror", (e) => errors.push(e.message));
 const source = () => readFileSync(join(dir, "index.html"), "utf8");
 const call = (name, input = {}) =>
   page.evaluate((n, i) => window.ariStudio.call(n, i), name, input);
-const button = (name) => page.locator(`button::-p-text(${name})`);
-const fill = (label, value) => page.locator(`[aria-label="${label}"]`).fill(value);
+const { button, fill } = ariControls(page);
 async function settled(tool) {
   await page.waitForFunction(
     (t) => {
@@ -128,11 +128,7 @@ try {
   let refused = false;
   await page.setRequestInterception(true);
   const intercept = (req) => {
-    if (
-      !refused &&
-      ["POST", "PUT"].includes(req.method()) &&
-      (req.url().includes("/gsap-mutations/") || req.url().includes("/files/"))
-    ) {
+    if (!refused && isAnimationWrite(req)) {
       refused = true;
       void req.respond({
         status: 503,
@@ -171,42 +167,18 @@ try {
   assert(await page.$eval('[aria-label="Ari työkalut"]', (e) => e.scrollHeight > 0));
   await page.setViewport({ width: 1440, height: 900 });
   report.checks.push("1440x900 and 1280x800 workspaces expose scrollable controls and timeline");
-  const cdp = await page.createCDPSession();
   const downloadDir = join(evidence, "downloads");
-  mkdirSync(downloadDir, { recursive: true });
-  await cdp.send("Browser.setDownloadBehavior", {
-    behavior: "allow",
-    downloadPath: downloadDir,
-    eventsEnabled: true,
-  });
-  const downloadComplete = new Promise((resolveDownload, reject) => {
-    const timeout = setTimeout(() => reject(new Error("download timed out")), 240000);
-    cdp.on("Browser.downloadProgress", (event) => {
-      if (event.state === "completed") {
-        clearTimeout(timeout);
-        resolveDownload(event);
-      } else if (event.state === "canceled") {
-        clearTimeout(timeout);
-        reject(new Error("download canceled"));
-      }
-    });
-  });
+  const { completed: downloadComplete } = await prepareDownload(page, downloadDir, 240000);
   const beforeExport = Date.now();
-  await button("Vie video · MP4").click();
-  await page.waitForSelector('[aria-label="Videon vienti"] a[download]', { timeout: 240000 });
-  const filename = await page.$eval('[aria-label="Videon vienti"] a[download]', (e) => e.download);
-  await page.locator('[aria-label="Videon vienti"] a[download]').click();
-  report.downloadEvent = await downloadComplete;
-  const video = join(downloadDir, filename);
-  assert(existsSync(video));
-  const probe = spawnSync(
-    "ffprobe",
-    ["-v", "error", "-show_streams", "-show_format", "-of", "json", video],
-    { encoding: "utf8" },
+  const { filename, event, video } = await downloadExport(
+    page,
+    downloadDir,
+    downloadComplete,
+    240000,
   );
-  assert.equal(probe.status, 0);
+  report.downloadEvent = event;
   report.video = video;
-  report.probe = JSON.parse(probe.stdout);
+  report.probe = probeVideo(video);
   report.exportMs = Date.now() - beforeExport;
   const stream = report.probe.streams.find((s) => s.codec_type === "video");
   assert.equal(stream.width, 1080);
@@ -238,4 +210,11 @@ try {
     ) + "\n",
   );
   await browser.close();
+}
+
+function isAnimationWrite(req) {
+  return (
+    ["POST", "PUT"].includes(req.method()) &&
+    ["/gsap-mutations/", "/files/"].some((path) => req.url().includes(path))
+  );
 }

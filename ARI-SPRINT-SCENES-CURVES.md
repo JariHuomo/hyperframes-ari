@@ -1,5 +1,7 @@
 # Ari Studio sprint 3 — precise curves and nested-scene time, 2026-09-09
 
+> Follow-up status: [Sprint 3 final UX closeout](ARI-SPRINT-FINAL-UX.md) supersedes the historical open-items list below.
+
 Implementation report for [`plans/2026-09-09-ari-studio-curves-and-scene-time-sprint.md`](plans/2026-09-09-ari-studio-curves-and-scene-time-sprint.md), which continued the two items the easy-motion sprint left open: _"tarkemmat käyrät ja sisäkkäisten kohtausten aikamuunnokset jäivät jatkotyöksi."_
 
 **Goal, in the plan's own acceptance sentence:** _"I see and adjust a motion's curve as a picture and as numbers, and a nested scene's motion is visible and adjustable in master time without opening the scene when the placement is unambiguous. A script gets the same curve and the same time conversion as a receipt."_

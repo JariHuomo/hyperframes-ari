@@ -7,6 +7,13 @@ export function domEditSelectionsTargetSame(
 ): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
+  // Assigning an id changes the selector, not the selected authored element.
+  if (
+    a.sourceFile === b.sourceFile &&
+    (a.element === b.element ||
+      (a.hfId && a.hfId === b.hfId && (a.selectorIndex ?? 0) === (b.selectorIndex ?? 0)))
+  )
+    return true;
   return getDomEditTargetKey(a) === getDomEditTargetKey(b);
 }
 

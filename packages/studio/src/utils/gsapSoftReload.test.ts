@@ -69,6 +69,17 @@ function buildMockIframe(overrides: Record<string, unknown> = {}) {
   };
 }
 
+it("preserves a compiled multi-scene bootstrap when only one scene was edited", () => {
+  const { iframe, mockTimeline } = buildMockIframe();
+  const script = iframe.contentDocument!.querySelectorAll("script:not([src])")[0]!;
+  script.textContent = SCRIPT_TEXT + '\nwindow.__timelines["child"] = gsap.timeline();';
+  const before = script.textContent;
+  expect(applySoftReload(iframe, SCRIPT_TEXT)).toBe("cannot-soft-reload");
+  expect(mockTimeline.kill).not.toHaveBeenCalled();
+  expect(script.textContent).toBe(before);
+  expect(script.parentNode).not.toBeNull();
+});
+
 describe("applySoftReload", () => {
   it('returns "cannot-soft-reload" when iframe is null', () => {
     expect(applySoftReload(null, SCRIPT_TEXT)).toBe("cannot-soft-reload");

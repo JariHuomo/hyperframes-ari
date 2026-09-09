@@ -13,7 +13,11 @@ afterEach(() => {
 
 const okReceipt = { ok: true, stage: "verified", animationId: "a1" };
 
-function render(ease = "power2.out", call = vi.fn(async () => okReceipt as unknown)) {
+function render(
+  ease = "power2.out",
+  call = vi.fn(async () => okReceipt as unknown),
+  instance?: string,
+) {
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
@@ -23,6 +27,7 @@ function render(ease = "power2.out", call = vi.fn(async () => okReceipt as unkno
         bridge={{ call }}
         handle="index.html#hero"
         animationId="a1"
+        instance={instance}
         ease={ease}
         busy={false}
         position={2}
@@ -37,16 +42,8 @@ function dragHandle(host: HTMLElement, finish: "pointerup" | "pointercancel") {
   const graph = host.querySelector<SVGSVGElement>('svg[viewBox="0 0 216 288"]')!;
   const handle = graph.querySelector<SVGCircleElement>(".cursor-grab")!;
   handle.setPointerCapture = vi.fn();
-  act(() => {
-    handle.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, clientX: 46, clientY: 52 }),
-    );
-  });
-  act(() => {
-    graph.dispatchEvent(
-      new PointerEvent("pointermove", { bubbles: true, pointerId: 1, clientX: 108, clientY: 144 }),
-    );
-  });
+  dispatchDragPointer(handle, "pointerdown", 46, 52);
+  dispatchDragPointer(graph, "pointermove", 108, 144);
   return () =>
     act(() => {
       graph.dispatchEvent(new PointerEvent(finish, { bubbles: true, pointerId: 1 }));
@@ -54,6 +51,15 @@ function dragHandle(host: HTMLElement, finish: "pointerup" | "pointercancel") {
 }
 
 describe("AriEase", () => {
+  it("carries the chosen instance through a curve commit", () => {
+    const { host, root, call } = render("power2.out", undefined, "headline-host-b");
+    dragHandle(host, "pointerup")();
+    expect(call).toHaveBeenCalledWith(
+      "studio_update_animation",
+      expect.objectContaining({ instance: "headline-host-b" }),
+    );
+    act(() => root.unmount());
+  });
   it("writes one bridge call on pointer-up and none while the pointer moves", () => {
     const { host, root, call } = render();
 
@@ -251,3 +257,9 @@ describe("AriEase", () => {
     act(() => root.unmount());
   });
 });
+
+function dispatchDragPointer(target: Element, type: string, clientX: number, clientY: number) {
+  act(() =>
+    target.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1, clientX, clientY })),
+  );
+}

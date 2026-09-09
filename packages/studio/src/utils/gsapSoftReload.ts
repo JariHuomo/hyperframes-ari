@@ -267,6 +267,16 @@ export function applySoftReload(
       return text.includes(`__timelines["${key}"]`) || text.includes(`__timelines['${key}']`);
     }),
   );
+  // The compiler may bundle several scoped scene registrations in ONE script.
+  // Replacing that bootstrap with one raw scene script would discard the other
+  // scenes and the compiler's per-instance scope. Rebuild the preview instead,
+  // before killing any timeline or removing any script.
+  const sharesBootstrap = staleScripts.some((script) =>
+    [...(script.textContent || "").matchAll(/__timelines\s*\[\s*["'`]([^"'`]+)["'`]\s*\]/g)].some(
+      (match) => match[1] !== "__proxied" && !targetKeys.includes(match[1]!),
+    ),
+  );
+  if (sharesBootstrap) return "cannot-soft-reload";
   // Multiple GSAP scripts exist but none registers a key this script owns — we
   // can't identify which element to replace (ambiguous, matching
   // extractGsapScriptText's single-script requirement). Escalate to a full reload

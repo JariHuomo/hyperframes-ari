@@ -172,6 +172,7 @@ export function AriEase({
   bridge,
   handle,
   animationId,
+  instance,
   ease,
   busy,
   index = 0,
@@ -181,6 +182,7 @@ export function AriEase({
   bridge: BridgeCall;
   handle: string;
   animationId: string;
+  instance?: string;
   ease: string;
   busy: boolean;
   index?: number;
@@ -213,6 +215,7 @@ export function AriEase({
     const result = await bridge.call("studio_update_animation", {
       handle,
       animationId,
+      ...(instance ? { instance } : {}),
       ease: next,
     });
     setPending(false);
@@ -234,6 +237,7 @@ export function AriEase({
     setError("");
     const result = await bridge.call("studio_frame", {
       animationId,
+      ...(instance ? { instance } : {}),
       samples: [0.25, 0.5, 0.75],
     });
     const failure = receiptFailure(result);

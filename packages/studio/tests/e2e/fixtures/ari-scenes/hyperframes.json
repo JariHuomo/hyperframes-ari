@@ -1,0 +1,8 @@
+{
+  "paths": {
+    "blocks": "scenes",
+    "components": "scenes/components",
+    "assets": "assets"
+  },
+  "skill": "motion-graphics"
+}

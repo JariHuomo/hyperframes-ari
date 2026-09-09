@@ -203,9 +203,9 @@ The catalogue is still the same **12** names; only schemas grew, so earlier scri
 | `studio_add_animation`    | `timeBasis`, `instance`; `ease` is now the full contract vocabulary | `scene { … }`, `affectsInstances`, `easeCurve`                                             |
 | `studio_update_animation` | `timeBasis`, `instance`, `easeEach`                                 | `scene { … }`, `affectsInstances`, `easeCurve`                                             |
 | `studio_inspect`          | —                                                                   | `easeCurve`, `easeEach` per animation                                                      |
-| `studio_frame`            | `animationId` + `samples: [0.25, 0.5, 0.75]`                        | `frames[]` of `{ url, time, progress, sourceRevision }`                                    |
+| `studio_frame`            | `animationId` + `samples: [0.25, 0.5, 0.75]`, `instance`            | `frames[]` of `{ url, time, progress, sourceRevision }`                                    |
 
-`studio_frame` with `samples` captures several instants inside one animation's own span in a single call — the timings come from the **saved source**, not the live preview, and if the frames do not all share one revision the call fails rather than returning a "comparison" of two compositions. `url`/`time` mirror the first sample, so every existing single-frame caller is untouched. In the panel, **Vertaa edelliseen** replays the motion twice with the previous curve's glyph and name beside it; that previous curve lives only in panel state, never in the source.
+`studio_frame` with `samples` captures several instants inside one animation's own span in a single call — the timings come from the **saved source**, not the live preview, and if the frames do not all share one revision the call fails rather than returning a "comparison" of two compositions. `url`/`time` mirror the first sample, so every existing single-frame caller is untouched. For nested motions, pass `instance`; the samples are converted to master time, including the playback rate. The panel forwards its selected occurrence. In the panel, **Vertaa edelliseen** currently replays the CURRENT motion twice with the previous curve's glyph and name beside it. It is not an A/B render; actual previous-versus-current playback remains follow-up work.
 
 ### Script example: a motion in master time, then its curve
 
@@ -242,6 +242,7 @@ if (!added.ok || added.stage !== "verified") throw new Error(JSON.stringify(adde
 const eased = await studio.call("studio_update_animation", {
   handle,
   animationId: added.animationId,
+  instance: placement.hostId,
   ease: "custom(M0,0 C0.25,0.9 0.4,1 1,1)",
 });
 if (!eased.ok) throw new Error(eased.reason); // an unknown curve is refused before the write
@@ -253,6 +254,7 @@ console.log(motion.easeCurve.points, motion.easeEach);
 
 const shots = await studio.call("studio_frame", {
   animationId: added.animationId,
+  instance: placement.hostId,
   samples: [0.25, 0.5, 0.75],
 });
 // shots.frames[] → three revision-bound PNGs from inside the motion; view them and judge the curve.
@@ -286,7 +288,7 @@ bun run --cwd packages/studio typecheck
 bun run --cwd packages/studio-server typecheck
 ```
 
-`ari:test:scenes` copies `examples/rajamarket-scenes` into a throwaway `examples/rajamarket-scenes-e2e` at the start of every run, drives the whole curve and nested-time flow at 1440×900 and 1280×800, exports an MP4 and measures the two headline placements out of its frames. It runs in two modes — the default mixed mode (bridge calls plus clicks) and `ARI_UI_ONLY=1`, where every step goes through visible controls — and both must end with byte-identical scene sources.
+`ari:test:scenes` copies the tracked, synthetic `packages/studio/tests/e2e/fixtures/ari-scenes` (plus GSAP from the workspace dependency) into a throwaway `examples/rajamarket-scenes-e2e` at the start of every run, drives the whole curve and nested-time flow at 1440×900 and 1280×800, exports an MP4 and measures the two headline placements out of its frames. It runs in two modes — the default mixed mode (bridge calls plus clicks) and `ARI_UI_ONLY=1`, where every step goes through visible controls — and both must end with byte-identical scene sources. Cold-start recovery reloads are disabled by default; `ARI_WORKSPACE_RELOADS` is a diagnostic override, not an acceptance shortcut. `ARI_SCENES_FIXTURE` can select another local fixture. The test includes nested-curve edits and verifies frame samples on the selected occurrence, the 0.9 s entrance endpoint, and held headlines at 3.5/6.9 s.
 
 The Ari browser test starts an isolated local server and project copy, exercises real script calls and visible clicks, checks source bytes and the untouched sibling, captures a source PNG and UI screenshots, undoes the style edit, reloads, and checks the remaining text and auto-record setting. It uses no paid provider. Evidence is written to `screenshots/YYYY-MM-DD/ari-loop/` and excluded from Git because logs contain local filesystem paths.
 
@@ -301,3 +303,7 @@ See the delivered own-agent workflow, final video and latest tests in [ARI-SPRIN
 5. **Production handoff.** Connect stable compositions to Ari's factory through versioned templates and its real price/approval/release gates. This standalone fork neither charges AdForge credits nor bypasses customer output reviews.
 
 The intended loop is: brief → script/asset plan → source edit → targeted UI adjustment → source-frame inspection → bounded correction → local render → final review. The first release makes the editing and observation part concrete; planning, model orchestration and automatic quality approval remain future work.
+
+## Sprint 3 closeout
+
+See [ARI-SPRINT-FINAL-UX.md](ARI-SPRINT-FINAL-UX.md) for the follow-up dispositions, reproducible UX evidence, new RajaMarket prototype, and the prioritized next sprint. Ari's layer shelf includes timed-hidden elements; source reload and minted IDs preserve the exact selection. Curve-only edits validate the owned motion span, not the current playhead.

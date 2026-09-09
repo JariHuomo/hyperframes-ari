@@ -91,12 +91,13 @@ const DOM_LAYER_IGNORED_TAGS = new Set([
   "wbr",
 ]);
 
-function isInspectableLayerElement(el: HTMLElement): boolean {
+function isInspectableLayerElement(el: HTMLElement, includeHidden = false): boolean {
   const tagName = el.tagName.toLowerCase();
   if (DOM_LAYER_IGNORED_TAGS.has(tagName)) return false;
 
   const computed = el.ownerDocument.defaultView?.getComputedStyle(el);
-  if (computed?.display === "none" || computed?.visibility === "hidden") return false;
+  if (!includeHidden && (computed?.display === "none" || computed?.visibility === "hidden"))
+    return false;
 
   return true;
 }
@@ -104,8 +105,9 @@ function isInspectableLayerElement(el: HTMLElement): boolean {
 export function getDomLayerPatchTarget(
   el: HTMLElement,
   activeCompositionPath: string | null,
+  includeHidden = false,
 ): Pick<DomEditSelection, "id" | "hfId" | "selector" | "selectorIndex" | "sourceFile"> | null {
-  if (!isInspectableLayerElement(el)) return null;
+  if (!isInspectableLayerElement(el, includeHidden)) return null;
   if (el.hasAttribute("data-composition-id")) return null;
 
   const selector = buildStableSelector(el);

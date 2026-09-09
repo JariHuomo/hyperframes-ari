@@ -8,7 +8,8 @@ import { tryGsapResizeIntercept } from "./gsapResizeIntercept";
 
 afterEach(() => {
   vi.restoreAllMocks();
-  usePlayerStore.setState({ currentTime: 0, activeKeyframePct: null });
+  document.body.replaceChildren();
+  usePlayerStore.setState({ currentTime: 0, activeKeyframePct: null, autoKeyframeEnabled: false });
 });
 
 /**
@@ -233,7 +234,9 @@ async function runResize(
   size: { width: number; height: number },
 ): Promise<Array<Record<string, unknown>>> {
   const selection = { id: "clip", selector: "#clip", element: el } as unknown as DomEditSelection;
-  usePlayerStore.setState({ currentTime: 0.5 }); // inside the tween's range
+  // These assertions cover the explicit auto-keyframe path, not the default
+  // whole-animation resize introduced by Ari.
+  usePlayerStore.setState({ currentTime: 0.5, autoKeyframeEnabled: true });
   const committed: Array<Record<string, unknown>> = [];
   const commitMutation = vi.fn(async (_sel: unknown, mutation: Record<string, unknown>) => {
     committed.push(mutation);
@@ -295,14 +298,8 @@ it("non-uniform drag commits scaleX/scaleY longhands", async () => {
  */
 // fallow-ignore-next-line code-duplication
 it("scales from the element's real box, not a hardcoded fallback", async () => {
-  const el = document.createElement("div");
-  el.id = "clip";
-  // Sized by a stylesheet, so it carries no inline width, and the draft
-  // recorded the box it measured instead.
-  el.setAttribute("data-hf-studio-original-box-width", "630");
-  el.setAttribute("data-hf-studio-original-box-height", "252");
-  document.body.append(el);
-  const selection = { id: "clip", selector: "#clip", element: el } as DomEditSelection;
+  usePlayerStore.setState({ currentTime: 0.5, autoKeyframeEnabled: true });
+  const { el, selection } = stylesheetSizedClip();
   const commitMutation = vi.fn();
 
   await tryGsapResizeIntercept(
@@ -342,12 +339,7 @@ it("scales from the element's real box, not a hardcoded fallback", async () => {
  */
 // fallow-ignore-next-line code-duplication
 it("does not mix the scale shorthand into a tween that speaks longhands", async () => {
-  const el = document.createElement("div");
-  el.id = "clip";
-  el.setAttribute("data-hf-studio-original-box-width", "630");
-  el.setAttribute("data-hf-studio-original-box-height", "252");
-  document.body.append(el);
-  const selection = { id: "clip", selector: "#clip", element: el } as DomEditSelection;
+  const { el, selection } = stylesheetSizedClip();
   const longhandTween = {
     ...scaleFromTween(),
     keyframes: {
@@ -482,3 +474,13 @@ it("does not move a statically positioned element when a scale resize lands", as
   // And the live element ends on the drop point, not a drag away from it.
   expect(el.getBoundingClientRect().x).toBeCloseTo(603.3, 0);
 });
+
+function stylesheetSizedClip() {
+  const el = document.createElement("div");
+  el.id = "clip";
+  // A stylesheet owns the dimensions; the resize draft keeps its measured box.
+  el.setAttribute("data-hf-studio-original-box-width", "630");
+  el.setAttribute("data-hf-studio-original-box-height", "252");
+  document.body.append(el);
+  return { el, selection: { id: "clip", selector: "#clip", element: el } as DomEditSelection };
+}

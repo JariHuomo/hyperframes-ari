@@ -1,3 +1,4 @@
+import { TITLE_SCENE, PACK_SCENE, SCENE_MANIFEST } from "./sceneTestFixture";
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -261,36 +262,6 @@ describe("studioSeek", () => {
 });
 
 /** Sprint S2/S4: which placement of a shared scene, and which clock. */
-const TITLE_SCENE = "compositions/title-card.html";
-const PACK_SCENE = "compositions/pack-grid.html";
-
-const sceneClip = (overrides: Record<string, unknown>) => ({
-  id: "host",
-  label: "Otsikkokortti",
-  start: 0,
-  duration: 4,
-  kind: "composition",
-  compositionId: "scene",
-  parentCompositionId: null,
-  compositionSrc: TITLE_SCENE,
-  compositionAncestors: ["root"],
-  playbackStart: 0,
-  playbackRate: 1,
-  ...overrides,
-});
-
-const SCENE_MANIFEST = [
-  sceneClip({ id: "title-host-a", compositionId: "title-a", start: 0, duration: 4 }),
-  sceneClip({ id: "title-host-b", compositionId: "title-b", start: 4, duration: 4 }),
-  sceneClip({
-    id: "pack-host",
-    compositionId: "pack",
-    compositionSrc: PACK_SCENE,
-    start: 2,
-    duration: 5,
-  }),
-];
-
 function sceneSelectionDeps(
   sourceFile: string,
   overrides: Partial<SelectionToolDeps> = {},

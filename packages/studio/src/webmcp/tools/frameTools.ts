@@ -18,12 +18,19 @@
  * same revision, so the set is comparable or it is refused.
  */
 
+import type { DomEditSelection } from "../../components/editor/domEditingTypes";
 import { buildFrameCaptureUrl } from "../../utils/frameCapture";
 import { toolFailure, toolOk, type ToolFailure, type ToolResult } from "../toolResult";
 import type { AnimationToolDeps } from "./animationTools";
 import type { InspectToolDeps } from "./inspectTools";
+import {
+  resolveSceneWrite,
+  isNestedSource,
+  SCENE_INSTANCE_SCHEMA,
+  type SceneToolDeps,
+} from "./animationScene";
 
-export interface FrameToolDeps {
+export interface FrameToolDeps extends SceneToolDeps {
   getProjectId: () => string | null;
   getCompositionPath: () => string | null;
   readPlayhead: () => { currentTime: number; duration: number; isPlaying: boolean };
@@ -71,6 +78,7 @@ export interface StudioFrameInput {
   animationId?: string;
   /** Fractions of that animation's duration, 0–1. Requires `animationId`. */
   samples?: number[];
+  instance?: string;
 }
 
 /**
@@ -167,11 +175,11 @@ async function captureAt(
   };
 }
 
-async function studioFrameSamples(
-  deps: FrameToolDeps,
-  input: StudioFrameInput,
-  projectId: string,
-): Promise<ToolResult<StudioFrameResult>> {
+function isSampleFraction(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+function readSampleRequest(input: StudioFrameInput) {
   const { animationId, samples } = input;
   if (typeof animationId !== "string" || !animationId) {
     return toolFailure("invalid", "samples needs the animationId whose span to sample");
@@ -180,12 +188,14 @@ async function studioFrameSamples(
     !Array.isArray(samples) ||
     samples.length === 0 ||
     samples.length > MAX_SAMPLES ||
-    !samples.every(
-      (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1,
-    )
+    !samples.every(isSampleFraction)
   ) {
     return toolFailure("invalid", `samples must be 1 to ${MAX_SAMPLES} fractions between 0 and 1`);
   }
+  return { animationId, samples };
+}
+
+async function readSampleSpan(deps: FrameToolDeps, input: StudioFrameInput) {
   const selection = deps.getCurrentSelection();
   if (!selection) {
     return toolFailure("blocked", "nothing is selected", "Call studio_select first.");
@@ -196,23 +206,62 @@ async function studioFrameSamples(
   // Timings come from the SAVED source, never from the live preview: the frames
   // are rendered from disk, so the instants they claim must be too.
   const snapshot = await deps.readAnimationSource(selection);
-  const animation = snapshot.animations.find((candidate) => candidate.id === animationId);
+  const animation = snapshot.animations.find((candidate) => candidate.id === input.animationId);
   if (!animation) {
     return toolFailure(
       "invalid",
-      `animation ${animationId} does not belong to the selected target`,
+      `animation ${input.animationId} does not belong to the selected target`,
       "Call studio_inspect for the current animation ids.",
     );
   }
   const position = animation.position;
   const duration = animation.duration;
   if (typeof position !== "number" || typeof duration !== "number" || duration <= 0) {
-    return toolFailure("invalid", `animation ${animationId} has no numeric position and duration`);
+    return toolFailure(
+      "invalid",
+      `animation ${input.animationId} has no numeric position and duration`,
+    );
   }
+  return sampleMasterSpan(deps, selection, input.instance, position, duration);
+}
+
+function sampleMasterSpan(
+  deps: FrameToolDeps,
+  selection: DomEditSelection,
+  instance: string | undefined,
+  position: number,
+  duration: number,
+) {
+  const mapped = resolveSceneWrite(deps, selection, {
+    instance,
+    position,
+    duration,
+    compositionDuration: deps.readPlayhead().duration,
+  });
+  if (!mapped.ok) return mapped;
+  if (isNestedSource(deps, selection) && !mapped.scene) {
+    return toolFailure("invalid", "Kohtauksen ruutukuvat vaativat ratkaistun esiintymän.");
+  }
+  const start = mapped.scene?.masterPosition ?? position;
+  const span = duration / (mapped.scene?.playbackRate ?? 1);
+  return { start, span };
+}
+
+async function studioFrameSamples(
+  deps: FrameToolDeps,
+  input: StudioFrameInput,
+  projectId: string,
+): Promise<ToolResult<StudioFrameResult>> {
+  const requested = readSampleRequest(input);
+  if ("ok" in requested) return requested;
+  const { animationId, samples } = requested;
+  const mapped = await readSampleSpan(deps, input);
+  if ("ok" in mapped) return mapped;
+  const { start, span } = mapped;
   const settledMs = clampSettle(input.settleMs);
   const frames: StudioFrameSample[] = [];
   for (const progress of samples) {
-    const captured = await captureAt(deps, projectId, position + duration * progress, settledMs);
+    const captured = await captureAt(deps, projectId, start + span * progress, settledMs);
     if ("ok" in captured) return captured;
     frames.push({ ...captured, progress });
   }
@@ -265,6 +314,7 @@ export const STUDIO_FRAME_INPUT_SCHEMA = {
       description:
         "With `samples`: sample inside this animation's own span on the selected target.",
     },
+    instance: SCENE_INSTANCE_SCHEMA,
     samples: {
       type: "array",
       minItems: 1,

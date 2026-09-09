@@ -52,7 +52,7 @@ type ExpectedMotion =
     };
 /** The ease that actually governs this tween: a keyframe tween's feel lives in
  * `keyframes.easeEach`, exactly as `AnimationCard` reads it. */
-export function effectiveEase(animation: GsapAnimation | undefined): string | null {
+function effectiveEase(animation: GsapAnimation | undefined): string | null {
   if (!animation) return null;
   return animation.keyframes?.easeEach ?? animation.ease ?? null;
 }
@@ -70,6 +70,127 @@ function updateFieldMatches(animation: GsapAnimation, key: string, requested: un
   return requested === actual;
 }
 
+type AddedMotion = Extract<ExpectedMotion, { kind: "add" }>;
+
+function addedAnimation(
+  before: AnimationSourceSnapshot,
+  after: AnimationSourceSnapshot,
+  expected: AddedMotion,
+) {
+  return after.animations.find((a) => {
+    if (before.animations.some((b) => b.id === a.id)) return false;
+    return typeof a.position === "number" && Math.abs(a.position - expected.position) < 0.002;
+  });
+}
+
+function readbackAnimation(
+  before: AnimationSourceSnapshot,
+  after: AnimationSourceSnapshot,
+  expected: ExpectedMotion,
+) {
+  if (expected.kind === "add") return addedAnimation(before, after, expected);
+  if (expected.kind === "delete")
+    return after.animations.find((a) => a.id === expected.animationId);
+  // Parser ids change with timing; preserve the source-order slot for updates.
+  const index = before.animations.findIndex((a) => a.id === expected.animationId);
+  return after.animations[index];
+}
+
+function optionalMethodMatches(actual: string, requested: string | undefined) {
+  return requested === undefined || actual === requested;
+}
+function optionalDurationMatches(actual: number | undefined, requested: number | undefined) {
+  return requested === undefined || Math.abs((actual ?? -1) - requested) < 0.002;
+}
+function optionalEaseMatches(actual: string | undefined, requested: string | undefined) {
+  return requested === undefined || easeMatches(requested, actual);
+}
+function requestedAddMatches(animation: GsapAnimation, expected: AddedMotion): boolean {
+  const fieldsMatch = [
+    optionalMethodMatches(animation.method, expected.method),
+    optionalDurationMatches(animation.duration, expected.duration),
+    optionalEaseMatches(animation.ease, expected.ease),
+  ].every(Boolean);
+  if (!fieldsMatch) return false;
+  return Object.entries(expected.properties ?? {}).every(
+    ([key, value]) => animation.properties[key] === value,
+  );
+}
+
+function updatedTargetMatches(
+  before: AnimationSourceSnapshot,
+  after: AnimationSourceSnapshot,
+  animation: GsapAnimation,
+  expected: Extract<ExpectedMotion, { kind: "update" }>,
+): boolean {
+  const prior = before.animations.find((a) => a.id === expected.animationId);
+  if (!prior || before.animations.length !== after.animations.length) return false;
+  return prior.method === animation.method && prior.targetSelector === animation.targetSelector;
+}
+
+function keyframeMatches(
+  animation: GsapAnimation | undefined,
+  expected: Extract<ExpectedMotion, { kind: "keyframe" }>,
+): boolean {
+  const keyframe = animation?.keyframes?.keyframes.find(
+    (k) => Math.abs(k.percentage - expected.percent) < 0.01,
+  );
+  return Boolean(
+    keyframe &&
+    Object.entries(expected.properties).every(([key, value]) => keyframe.properties[key] === value),
+  );
+}
+
+const READBACK_MISMATCH =
+  "Tallennettu liike ei vastaa pyyntöä. Tarkista kohde ennen uutta yritystä.";
+function addedReadbackFailure(
+  before: AnimationSourceSnapshot,
+  after: AnimationSourceSnapshot,
+  animation: GsapAnimation | undefined,
+  expected: AddedMotion,
+) {
+  if (!animation || after.animations.length !== before.animations.length + 1)
+    return "Tallennettu liike ei vastaa valittuja asetuksia.";
+  return requestedAddMatches(animation, expected)
+    ? null
+    : "Tallennettu liike ei vastaa valittuja asetuksia.";
+}
+function updatedReadbackFailure(
+  before: AnimationSourceSnapshot,
+  after: AnimationSourceSnapshot,
+  animation: GsapAnimation | undefined,
+  expected: Extract<ExpectedMotion, { kind: "update" }>,
+) {
+  if (!animation || !updatedTargetMatches(before, after, animation, expected))
+    return "Liikkeen kohde muuttui tallennuksen aikana.";
+  return Object.entries(expected.updates).every(([key, value]) =>
+    updateFieldMatches(animation, key, value),
+  )
+    ? null
+    : READBACK_MISMATCH;
+}
+function readbackFailure(
+  before: AnimationSourceSnapshot,
+  after: AnimationSourceSnapshot,
+  animation: GsapAnimation | undefined,
+  expected: ExpectedMotion,
+): string | null {
+  switch (expected.kind) {
+    case "delete":
+      return !animation && after.animations.length === before.animations.length - 1
+        ? null
+        : READBACK_MISMATCH;
+    case "add":
+      return addedReadbackFailure(before, after, animation, expected);
+    case "keyframe":
+      return keyframeMatches(animation, expected)
+        ? null
+        : "Avainruudun tallennusta ei voitu varmistaa.";
+    case "update":
+      return updatedReadbackFailure(before, after, animation, expected);
+  }
+}
+
 export async function settleAnimationWrite<T extends object>(
   deps: { readAnimationSource?: (selection: DomEditSelection) => Promise<AnimationSourceSnapshot> },
   selection: DomEditSelection,
@@ -79,67 +200,9 @@ export async function settleAnimationWrite<T extends object>(
 ) {
   if (!before || !deps.readAnimationSource) return dispatched(value, false);
   const after = await deps.readAnimationSource(selection);
-  // Parser ids include authored timing. Moving a tween gives it a new id;
-  // preserve its source-order slot and check the target, method and values.
-  const priorIndex =
-    expected.kind === "add"
-      ? -1
-      : before.animations.findIndex((a) => a.id === expected.animationId);
-  const prior = before.animations[priorIndex];
-  const animation =
-    expected.kind === "add"
-      ? after.animations.find(
-          (a) =>
-            !before.animations.some((b) => b.id === a.id) &&
-            typeof a.position === "number" &&
-            Math.abs(a.position - expected.position) < 0.002,
-        )
-      : expected.kind === "update" || expected.kind === "keyframe"
-        ? after.animations[priorIndex]
-        : after.animations.find((a) => a.id === expected.animationId);
-  if (
-    expected.kind === "update" &&
-    (!prior ||
-      !animation ||
-      before.animations.length !== after.animations.length ||
-      prior.method !== animation.method ||
-      prior.targetSelector !== animation.targetSelector)
-  )
-    return toolFailure("failed", "Liikkeen kohde muuttui tallennuksen aikana.");
-  if (
-    expected.kind === "add" &&
-    (!animation ||
-      after.animations.length !== before.animations.length + 1 ||
-      (expected.method !== undefined && animation.method !== expected.method) ||
-      (expected.duration !== undefined &&
-        Math.abs((animation.duration ?? -1) - expected.duration) >= 0.002) ||
-      (expected.ease !== undefined && !easeMatches(expected.ease, animation.ease)) ||
-      (expected.properties &&
-        !Object.entries(expected.properties).every(([key, v]) => animation.properties[key] === v)))
-  )
-    return toolFailure("failed", "Tallennettu liike ei vastaa valittuja asetuksia.");
-  const keyframe = animation?.keyframes?.keyframes.find(
-    (k) => Math.abs(k.percentage - (expected.kind === "keyframe" ? expected.percent : -1)) < 0.01,
-  );
-  if (
-    expected.kind === "keyframe" &&
-    (!keyframe ||
-      !Object.entries(expected.properties).every(([key, v]) => keyframe.properties[key] === v))
-  )
-    return toolFailure("failed", "Avainruudun tallennusta ei voitu varmistaa.");
-  const matches =
-    expected.kind === "delete"
-      ? !animation && after.animations.length === before.animations.length - 1
-      : Boolean(animation) &&
-        (expected.kind !== "update" ||
-          Object.entries(expected.updates).every(
-            ([key, v]) => animation !== undefined && updateFieldMatches(animation, key, v),
-          ));
-  if (!matches)
-    return toolFailure(
-      "failed",
-      "Tallennettu liike ei vastaa pyyntöä. Tarkista kohde ennen uutta yritystä.",
-    );
+  const animation = readbackAnimation(before, after, expected);
+  const failure = readbackFailure(before, after, animation, expected);
+  if (failure) return toolFailure("failed", failure);
   const curve = easeCurveOf(effectiveEase(animation));
   const receipt = verified(
     {

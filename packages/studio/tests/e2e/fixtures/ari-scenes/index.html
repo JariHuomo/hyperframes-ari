@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="fi">
+  <head>
+    <meta charset="utf-8" />
+    <title>Testikauppa — Kuusi mukaan. — PROTOTYYPPI (kohtaukset)</title>
+    <script src="assets/gsap.min.js"></script>
+    <style>
+      @font-face {
+        font-family: Archivo;
+        src: url("assets/fonts/archivo-latin.woff2") format("woff2");
+        font-weight: 100 900;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        width: 1080px;
+        height: 1920px;
+        overflow: hidden;
+      }
+      body {
+        font-family: Archivo, sans-serif;
+      }
+      #rajamarket-scenes {
+        width: 1080px;
+        height: 1920px;
+        position: relative;
+        overflow: hidden;
+        background: #faf4e9;
+        color: #aa1820;
+      }
+      #red-field {
+        position: absolute;
+        inset: 0 0 auto;
+        height: 644px;
+        background: #c62128;
+        clip-path: polygon(0 0, 100% 0, 100% 96%, 0 100%);
+      }
+      #brand {
+        position: absolute;
+        left: 78px;
+        top: 29px;
+        width: 352px;
+        height: 196px;
+        object-fit: contain;
+        clip-path: inset(24% 0 24% 0);
+      }
+      #prototype {
+        position: absolute;
+        left: 748px;
+        top: 93px;
+        width: 260px;
+        height: 40px;
+        color: #fff6e7;
+        font-size: 21px;
+        font-weight: 700;
+        letter-spacing: 3px;
+      }
+      /* Both headline hosts occupy the same frame region; their master windows never overlap. */
+      .headline-host {
+        position: absolute;
+        left: 76px;
+        top: 203px;
+        width: 935px;
+        height: 376px;
+      }
+      #pack-grid-host {
+        position: absolute;
+        left: 78px;
+        top: 784px;
+        width: 924px;
+        height: 722px;
+      }
+      #product {
+        position: absolute;
+        left: 80px;
+        top: 676px;
+        width: 920px;
+        height: 52px;
+        text-align: center;
+        font-size: 36px;
+        font-weight: 750;
+        letter-spacing: 1px;
+      }
+      #store {
+        position: absolute;
+        left: 80px;
+        top: 1531px;
+        width: 920px;
+        height: 49px;
+        font-size: 34px;
+        font-weight: 750;
+        text-align: center;
+      }
+      #cta {
+        position: absolute;
+        left: 132px;
+        top: 1607px;
+        width: 816px;
+        height: 95px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 3px solid #aa1820;
+        border-radius: 3px;
+        color: #aa1820;
+        font-size: 42px;
+        font-weight: 800;
+      }
+      #site {
+        position: absolute;
+        left: 80px;
+        top: 1723px;
+        width: 920px;
+        height: 40px;
+        text-align: center;
+        font-size: 30px;
+        font-weight: 700;
+      }
+      #conditions {
+        position: absolute;
+        left: 78px;
+        top: 1775px;
+        width: 924px;
+        height: 104px;
+        font-size: 36px;
+        line-height: 1.35;
+        text-align: center;
+        color: #7b2929;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      data-hf-id="master-root"
+      id="rajamarket-scenes"
+      data-composition-id="rajamarket-scenes"
+      data-root="true"
+      data-width="1080"
+      data-height="1920"
+      data-duration="7"
+    >
+      <div data-hf-id="red-field" id="red-field" aria-hidden="true"></div>
+      <img
+        data-hf-id="brand"
+        id="brand"
+        class="clip"
+        data-start="0"
+        data-duration="7"
+        data-track-index="0"
+        src="assets/logo.svg"
+        alt="Testikauppa"
+      />
+      <div
+        data-hf-id="prototype-label"
+        id="prototype"
+        class="clip"
+        data-start="0"
+        data-duration="7"
+        data-track-index="1"
+      >
+        PROTOTYYPPI
+      </div>
+
+      <!-- Instance A of scenes/headline-card.html: master 0.12 s -> 5.60 s, rate 1.
+       Scene time 0 -> 0.90 s runs over master 0.12 -> 1.02 s, then holds. -->
+      <div
+        data-hf-id="headline-host-a"
+        id="headline-host-a"
+        class="clip headline-host"
+        data-composition-id="headline-card-a"
+        data-composition-src="scenes/headline-card.html"
+        data-start="0.12"
+        data-duration="5.48"
+        data-playback-rate="1"
+        data-track-index="2"
+      ></div>
+
+      <!-- Instance B of the same scene: master 5.60 s -> 7.00 s, rate 1.5.
+       Scene time 0 -> 0.90 s runs over master 5.60 -> 6.20 s (0.60 s of master
+       for 0.90 s of scene), then holds to the last frame. -->
+      <div
+        data-hf-id="headline-host-b"
+        id="headline-host-b"
+        class="clip headline-host"
+        data-composition-id="headline-card-b"
+        data-composition-src="scenes/headline-card.html"
+        data-start="5.6"
+        data-duration="1.4"
+        data-playback-rate="1.5"
+        data-track-index="2"
+      ></div>
+
+      <div
+        data-hf-id="product-line"
+        id="product"
+        class="clip"
+        data-start="0"
+        data-duration="7"
+        data-track-index="3"
+      >
+        Testipatukka · 6 × 41,5 g
+      </div>
+
+      <!-- The six packs, one instance, rate 1: scene time == master time. -->
+      <div
+        data-hf-id="pack-grid-host"
+        id="pack-grid-host"
+        class="clip"
+        data-composition-id="pack-grid"
+        data-composition-src="scenes/pack-grid.html"
+        data-start="0"
+        data-duration="7"
+        data-playback-rate="1"
+        data-track-index="4"
+      ></div>
+
+      <div
+        data-hf-id="store"
+        id="store"
+        class="clip"
+        data-start="0"
+        data-duration="7"
+        data-track-index="5"
+      >
+        Testimyymälä
+      </div>
+      <div
+        data-hf-id="cta"
+        id="cta"
+        class="clip"
+        data-start="0"
+        data-duration="7"
+        data-track-index="6"
+      >
+        Tutustu tuotteisiin
+      </div>
+      <div
+        data-hf-id="site"
+        id="site"
+        class="clip"
+        data-start="0"
+        data-duration="7"
+        data-track-index="7"
+      >
+        example.test
+      </div>
+      <div
+        data-hf-id="conditions"
+        id="conditions"
+        class="clip"
+        data-start="0"
+        data-duration="7"
+        data-track-index="8"
+      >
+        Kuvitteellinen tuote ja hinta. Vain editorin testi.
+      </div>
+    </div>
+    <script>
+      const tl = gsap.timeline({ paused: true });
+      // CTA switches contrast atomically, then settles in scale; no low-contrast colour crossfade.
+      tl.set("#cta", { backgroundColor: "#aa1820", color: "#fff7eb" }, 2.6);
+      tl.fromTo(
+        "#cta",
+        { scale: 0.97 },
+        { scale: 1, duration: 0.32, ease: "power2.out", immediateRender: false },
+        2.6,
+      );
+      tl.from("#site", { opacity: 0, duration: 0.45, ease: "power2.out" }, 2.6);
+      // The headline entrance and the pack choreography live in the sub-compositions.
+      tl.set("#rajamarket-scenes", {}, 7);
+      window.__timelines = window.__timelines || {};
+      window.__timelines["rajamarket-scenes"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

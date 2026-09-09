@@ -1,3 +1,4 @@
+import { TITLE_SCENE, PACK_SCENE, SCENE_MANIFEST } from "./sceneTestFixture";
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -283,9 +284,11 @@ describe("studioUpdateAnimation", () => {
       ),
     );
 
-    expect(result.kind).toBe("invalid");
-    expect(result.reason).toMatch(/Tuntematon käyrä/);
-    expect(updateAnimation).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      kind: "invalid",
+      reason: expect.stringMatching(/Tuntematon käyrä/),
+    });
+    expect(updateAnimation).toHaveBeenCalledTimes(0);
   });
 
   it("accepts the whole closed vocabulary and writes it normalised", async () => {
@@ -529,36 +532,6 @@ describe("studioDeleteAnimation", () => {
  * Sprint S4/S5: the same twelve tools, now aware of both clocks. Every number
  * here comes from the clip manifest; nothing is inferred from the element.
  */
-const TITLE_SCENE = "compositions/title-card.html";
-const PACK_SCENE = "compositions/pack-grid.html";
-
-const sceneClip = (overrides: Record<string, unknown>) => ({
-  id: "host",
-  label: "Otsikkokortti",
-  start: 0,
-  duration: 4,
-  kind: "composition",
-  compositionId: "scene",
-  parentCompositionId: null,
-  compositionSrc: TITLE_SCENE,
-  compositionAncestors: ["root"],
-  playbackStart: 0,
-  playbackRate: 1,
-  ...overrides,
-});
-
-const SCENE_MANIFEST = [
-  sceneClip({ id: "title-host-a", compositionId: "title-a", start: 0, duration: 4 }),
-  sceneClip({ id: "title-host-b", compositionId: "title-b", start: 4, duration: 4 }),
-  sceneClip({
-    id: "pack-host",
-    compositionId: "pack",
-    compositionSrc: PACK_SCENE,
-    start: 2,
-    duration: 5,
-  }),
-];
-
 function nestedDeps(
   sourceFile: string,
   overrides: Partial<AnimationToolDeps> = {},
@@ -780,19 +753,41 @@ describe("studioUpdateAnimation · nested scene time", () => {
     expect(updateAnimation).not.toHaveBeenCalled();
   });
 
-  it("leaves an ease-only update alone: no position, no scene conversion", async () => {
+  it("keeps position unchanged during an ease-only edit with an explicit occurrence", async () => {
     const updateAnimation = vi.fn(async () => true);
 
     const ok = expectOk<StudioUpdateAnimationResult>(
       await studioUpdateAnimation(
         nestedDeps(TITLE_SCENE, { updateAnimation }),
-        animationInput({ animationId: "anim-1", ease: "power3.out" }),
+        animationInput({ animationId: "anim-1", ease: "power3.out", instance: "title-host-b" }),
       ),
     );
 
-    expect(ok.scene).toBeUndefined();
+    expect(ok.scene).toMatchObject({ instance: "title-host-b" });
     expect(updateAnimation).toHaveBeenCalledWith(expect.anything(), "anim-1", {
       ease: "power3.out",
     });
   });
+});
+
+it("validates duration-only edits and reports the animation start, not the playhead", async () => {
+  const updateAnimation = vi.fn(async () => true);
+  const deps = nestedDeps(TITLE_SCENE, {
+    getAnimationsForSelection: async () => [{ id: "anim-1", position: 1, duration: 0.5 }],
+    readPlayhead: () => ({ currentTime: 9, duration: 10, isPlaying: false }),
+    updateAnimation,
+  });
+  const input = animationInput({ animationId: "anim-1", instance: "title-host-b", duration: 0.8 });
+  const result = expectOk<StudioUpdateAnimationResult>(await studioUpdateAnimation(deps, input));
+  expect(result.scene).toMatchObject({ localPosition: 1, masterPosition: 5 });
+  updateAnimation.mockClear();
+  expect(expectFailure(await studioUpdateAnimation(deps, { ...input, duration: 4 })).kind).toBe(
+    "invalid",
+  );
+  expect(updateAnimation).not.toHaveBeenCalled();
+  expect(
+    expectFailure(
+      await studioUpdateAnimation(deps, animationInput({ animationId: "anim-1", ease: "none" })),
+    ).kind,
+  ).toBe("invalid");
 });

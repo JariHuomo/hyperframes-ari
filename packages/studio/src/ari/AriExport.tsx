@@ -9,19 +9,16 @@ function jobRecord(value: unknown): value is {
   createdAt: number;
   error?: string;
 } {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "id" in value &&
-    typeof value.id === "string" &&
-    "status" in value &&
-    typeof value.status === "string" &&
-    "filename" in value &&
-    typeof value.filename === "string" &&
-    "progress" in value &&
-    typeof value.progress === "number" &&
-    "createdAt" in value &&
-    typeof value.createdAt === "number"
+  if (typeof value !== "object" || value === null) return false;
+  const fields = {
+    id: "string",
+    status: "string",
+    filename: "string",
+    progress: "number",
+    createdAt: "number",
+  };
+  return Object.entries(fields).every(
+    ([key, type]) => key in value && typeof Reflect.get(value, key) === type,
   );
 }
 export function AriExport({ busy }: { busy: boolean }) {

@@ -146,32 +146,68 @@ export function AriControlPanel({
         </button>
       </div>
       <AriStatus bridge={bridge} call={call} />
-      {bridge &&
-        focusMode &&
+      <AriDockPortals
+        bridge={bridge}
+        focusMode={focusMode}
+        layersHost={layersHost}
+        timelineHost={timelineHost}
+        expanded={expanded}
+        commandPanelHost={commandPanelHost}
+        getSnapshot={getSnapshot}
+        busy={busy}
+        handle={look.ok ? look.selection?.handle : null}
+        time={time}
+        call={call}
+      />
+    </section>
+  );
+}
+
+function AriDockPortals({
+  bridge,
+  focusMode,
+  layersHost,
+  timelineHost,
+  expanded,
+  commandPanelHost,
+  getSnapshot,
+  busy,
+  handle,
+  time,
+  call,
+}: {
+  bridge: AriAgentBridge | null;
+  focusMode: boolean;
+  layersHost?: HTMLElement | null;
+  timelineHost?: HTMLElement | null;
+  expanded: boolean;
+  commandPanelHost?: HTMLElement | null;
+  getSnapshot: () => StudioLookSnapshot;
+  busy: boolean;
+  handle: string | null | undefined;
+  time: string;
+  call: AriCallReceipt | null;
+}) {
+  if (!bridge) return null;
+  return (
+    <>
+      {" "}
+      {focusMode &&
         layersHost &&
         createPortal(
           <AriLayers bridge={bridge} getSnapshot={getSnapshot} busy={busy} />,
           layersHost,
         )}
-      {bridge &&
-        focusMode &&
+      {focusMode &&
         timelineHost &&
-        createPortal(
-          <AriTimeline
-            bridge={bridge}
-            handle={look.ok ? look.selection?.handle : null}
-            busy={busy}
-          />,
-          timelineHost,
-        )}
+        createPortal(<AriTimeline bridge={bridge} handle={handle} busy={busy} />, timelineHost)}
       {expanded &&
-        bridge &&
         commandPanelHost &&
         createPortal(
           <AriCommandPanel bridge={bridge} getSnapshot={getSnapshot} time={time} call={call} />,
           commandPanelHost,
         )}
-    </section>
+    </>
   );
 }
 
