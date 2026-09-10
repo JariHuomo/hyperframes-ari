@@ -62,7 +62,7 @@ export function AriTimeline({
           +1 ruutu
         </button>
         <span className="w-32 text-xs tabular-nums">
-          {time.toFixed(2)} / {duration.toFixed(2)} s
+          {time.toFixed(2).replace(".", ",")} / {duration.toFixed(2).replace(".", ",")} s
         </span>
         <span className="truncate text-xs">{domEditSelection?.label || "Valitse kohde"}</span>
       </div>

@@ -1,12 +1,15 @@
+import { installOfflineServerGuard } from "./vite.offline";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { readFileSync, readdirSync, existsSync, lstatSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { readNodeRequestBody } from "./vite.request-body.js";
+import { readNodeRequestBody, studioRequestBodyLimit } from "./vite.request-body.js";
 import { watch } from "chokidar";
 import { createProjectSignatureCache, createViteAdapter } from "./vite.adapter";
 import { previewConfigPayload } from "./vite.preview-config";
 import { loadStudioServerDevModule } from "./vite.studio-server-module";
+
+if (process.env.ARI_OFFLINE === "1") installOfflineServerGuard();
 
 async function loadRuntimeSourceForDev(
   server: import("vite").ViteDevServer,
@@ -174,7 +177,7 @@ function devProjectApi(): Plugin {
           url.pathname = url.pathname.slice(4);
           let body: Buffer | undefined;
           if (req.method !== "GET" && req.method !== "HEAD") {
-            const bytes = await readNodeRequestBody(req);
+            const bytes = await readNodeRequestBody(req, studioRequestBodyLimit(req.url));
             body = bytes.byteLength > 0 ? bytes : undefined;
           }
           const headers: Record<string, string> = {};
@@ -191,13 +194,25 @@ function devProjectApi(): Plugin {
         } catch (err) {
           console.error("[Studio API] Error:", err);
           if (!res.headersSent) {
-            res.writeHead(500, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "Internal server error" }));
+            res.writeHead(err instanceof RangeError ? 413 : 500, {
+              "Content-Type": "application/json",
+            });
+            res.end(
+              JSON.stringify({
+                error: err instanceof RangeError ? err.message : "Internal server error",
+              }),
+            );
           }
         }
       });
 
       projectWatcher.on("change", (filePath: string) => {
+        if (
+          filePath
+            .split(/[\\/]/)
+            .some((part) => part === ".ari-notebook" || part === ".ari-versions")
+        )
+          return;
         if (
           !filePath.endsWith(".html") &&
           !filePath.endsWith(".css") &&

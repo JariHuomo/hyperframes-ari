@@ -43,6 +43,26 @@ function snapshot(): StudioLookSnapshot {
     duration: 7,
     isPlaying: false,
     elements: [],
+    clipManifest: [
+      {
+        id: "first",
+        compositionId: "headline-card",
+        compositionSrc: SCENE,
+        kind: "composition",
+        label: "First",
+        start: 0,
+        duration: 3,
+      },
+      {
+        id: "second",
+        compositionId: "headline-card",
+        compositionSrc: SCENE,
+        kind: "composition",
+        label: "Second",
+        start: 3,
+        duration: 3,
+      },
+    ],
     scene: {
       status: "ready",
       items: [
@@ -63,20 +83,24 @@ function snapshot(): StudioLookSnapshot {
 describe("AriLayers", () => {
   it("keeps a row per placement of a twice-hosted scene and logs no duplicate-key warning", () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const call = vi.fn(async () => ({ ok: true }));
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
     act(() => {
-      root.render(
-        <AriLayers
-          bridge={{ call: vi.fn(async () => ({ ok: true })) } as never}
-          getSnapshot={snapshot}
-          busy={false}
-        />,
-      );
+      root.render(<AriLayers bridge={{ call } as never} getSnapshot={snapshot} busy={false} />);
     });
 
     expect(host.querySelectorAll('[aria-label="Tasot"] button').length).toBe(4);
+    const second = Array.from(host.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Headline · Second"),
+    );
+    expect(second).toBeDefined();
+    act(() => second?.click());
+    expect(call).toHaveBeenCalledWith(
+      "studio_select",
+      expect.objectContaining({ instance: "second" }),
+    );
     expect(errors.mock.calls.some((call) => String(call[0]).includes("same key"))).toBe(false);
     act(() => root.unmount());
   });

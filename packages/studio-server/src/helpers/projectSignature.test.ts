@@ -36,6 +36,7 @@ describe("affectsProjectSignature", () => {
     expect(affects(".thumbnails/frame-0.jpg")).toBe(false);
     expect(affects("node_modules/pkg/index.js")).toBe(false);
     expect(affects("renders/out.mp4")).toBe(false);
+    expect(affects(".ari-notebook/notebook.json")).toBe(false);
   });
 
   it("rejects a directory event on an excluded dir itself", () => {
@@ -80,4 +81,9 @@ describe("createProjectSignature", () => {
       closeSync(descriptor);
     }
   });
+});
+
+it("excludes version publication from preview invalidation", () => {
+  expect(affectsProjectSignature("/project", "/project/.ari-versions/index.json")).toBe(false);
+  expect(affectsProjectSignature("/project", "/project/index.html")).toBe(true);
 });

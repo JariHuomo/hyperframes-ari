@@ -24,7 +24,6 @@ export function useServerConnection(): ServerConnectionState {
   const [waitingForServer, setWaitingForServer] = useState(false);
 
   useMountEffect(() => {
-    const hashProjectId = parseProjectIdFromHash(window.location.hash);
     let cancelled = false;
     // Explicitly `number` (the DOM return of window.setTimeout) rather than
     // ReturnType<typeof window.setTimeout> — with @types/node present, that infers
@@ -41,6 +40,7 @@ export function useServerConnection(): ServerConnectionState {
         .then((r) => r.json())
         .then((data) => {
           if (cancelled) return;
+          const hashProjectId = parseProjectIdFromHash(window.location.hash);
           if (hashProjectId) {
             setProjectId(hashProjectId);
             setWaitingForServer(false);

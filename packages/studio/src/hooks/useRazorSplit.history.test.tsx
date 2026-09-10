@@ -143,7 +143,8 @@ async function undoViaDisk(harness: Pick<Harness, "disk" | "store">) {
   return harness.store.undo({
     readFile: async (path) => harness.disk[path],
     writeFile: async (path, content) => {
-      harness.disk[path] = content;
+      if (content === null) delete harness.disk[path];
+      else harness.disk[path] = content;
     },
   });
 }

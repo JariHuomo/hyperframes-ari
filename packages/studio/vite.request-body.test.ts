@@ -1,6 +1,6 @@
 import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { readNodeRequestBody } from "./vite.request-body.js";
+import { readNodeRequestBody, studioRequestBodyLimit } from "./vite.request-body.js";
 
 describe("readNodeRequestBody", () => {
   it("preserves binary request bytes", async () => {
@@ -17,4 +17,26 @@ describe("readNodeRequestBody", () => {
 
     expect(body.byteLength).toBe(0);
   });
+});
+
+it("rejects oversized chunked bodies before buffering the remaining chunks", async () => {
+  let consumed = 0;
+  async function* body() {
+    consumed++;
+    yield Buffer.alloc(5);
+    consumed++;
+    yield Buffer.alloc(5);
+    consumed++;
+    yield Buffer.alloc(5);
+  }
+  await expect(readNodeRequestBody(body(), 8)).rejects.toThrow("liian suuri");
+  expect(consumed).toBe(2);
+});
+
+it("allows bounded binary history without widening image import requests", () => {
+  expect(studioRequestBodyLimit("/api/ari/projects/demo/versions/file")).toBe(48 * 1024 * 1024);
+  expect(studioRequestBodyLimit("/api/ari/projects/demo/images")).toBe(8 * 1024 * 1024);
+  expect(studioRequestBodyLimit("/api/ari/projects/demo/versions-wrong/file")).toBe(
+    8 * 1024 * 1024,
+  );
 });

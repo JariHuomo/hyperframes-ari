@@ -21,12 +21,17 @@ type IframeWindow = Window & {
 };
 
 /**
- * CDN URL for the GSAP MotionPathPlugin. Shared between the one-time preview
- * bootstrap (ensureMotionPathPluginLoaded) and the soft-reload fallback so the
- * version is pinned in a single place.
+ * Where the GSAP MotionPathPlugin comes from. Shared between the one-time preview
+ * bootstrap (ensureMotionPathPluginLoaded) and the soft-reload fallback so it is
+ * pinned in a single place.
+ *
+ * The studio server serves it from its own `gsap` dependency
+ * (studio-server/src/routes/vendorScripts.ts). It used to be a jsdelivr URL,
+ * which made every preview reach the internet: with the network blocked the
+ * aborted script raised a page error and the soft reload after an edit lost its
+ * timeline, so undo never reached the source.
  */
-const MOTION_PATH_PLUGIN_CDN =
-  "https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/MotionPathPlugin.min.js";
+const MOTION_PATH_PLUGIN_CDN = "/api/vendor/gsap/MotionPathPlugin.min.js";
 
 /**
  * Pre-load + register MotionPathPlugin ONCE in the preview iframe so

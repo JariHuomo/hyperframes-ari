@@ -206,7 +206,9 @@ export function usePreviewPersistence({
       if (strategy === "full") {
         const player = usePlayerStore.getState();
         player.setElements([]);
-        player.setSelectedElementId(null);
+        // Keep the selected identity while discovery rebuilds the rows.
+        // A preview refresh is not a user deselection; missing targets are
+        // cleared by the selection resolver after the new document is ready.
         player.setTimelineReady(false);
         return;
       }

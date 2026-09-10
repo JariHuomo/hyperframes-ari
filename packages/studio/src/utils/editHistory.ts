@@ -1,13 +1,17 @@
 export type EditHistoryKind = "manual" | "motion" | "timeline" | "source";
 
 export interface EditHistoryFileSnapshot {
-  before: string;
-  after: string;
+  encoding?: "base64";
+  before: string | null;
+  after: string | null;
   beforeHash: string;
   afterHash: string;
 }
 
 export interface EditHistoryEntry {
+  operationId?: string;
+  beforeVersionId?: string;
+  afterVersionId?: string;
   id: string;
   projectId: string;
   label: string;
@@ -32,6 +36,7 @@ export interface EditHistoryOptions {
 }
 
 export interface BuildEditHistoryEntryInput {
+  operationId?: string;
   id: string;
   projectId: string;
   label: string;
@@ -39,7 +44,7 @@ export interface BuildEditHistoryEntryInput {
   coalesceKey?: string;
   coalesceMs?: number;
   now: number;
-  files: Record<string, { before: string; after: string }>;
+  files: Record<string, { before: string | null; after: string | null; encoding?: "base64" }>;
 }
 
 export type EditHistoryDirection = "undo" | "redo";
@@ -53,20 +58,21 @@ export type EditHistoryTransitionResult =
       ok: true;
       state: EditHistoryState;
       entry: EditHistoryEntry;
-      filesToWrite: Record<string, string>;
+      filesToWrite: Record<string, string | null>;
     }
   | {
       ok: false;
       reason: "empty" | "content-mismatch";
       state: EditHistoryState;
-      filesToWrite: Record<string, string>;
+      filesToWrite: Record<string, string | null>;
       path?: string;
     };
 
 const DEFAULT_MAX_ENTRIES = 100;
 const DEFAULT_COALESCE_MS = 300;
 
-export function hashEditHistoryContent(content: string): string {
+export function hashEditHistoryContent(content: string | null): string {
+  if (content === null) return "absent";
   let hash = 2166136261;
   for (let index = 0; index < content.length; index += 1) {
     hash ^= content.charCodeAt(index);
@@ -89,6 +95,7 @@ export function buildEditHistoryEntry(input: BuildEditHistoryEntryInput): EditHi
   for (const [path, snapshot] of Object.entries(input.files)) {
     if (snapshot.before === snapshot.after) continue;
     files[path] = {
+      encoding: snapshot.encoding,
       before: snapshot.before,
       after: snapshot.after,
       beforeHash: hashEditHistoryContent(snapshot.before),
@@ -97,6 +104,7 @@ export function buildEditHistoryEntry(input: BuildEditHistoryEntryInput): EditHi
   }
 
   return {
+    operationId: input.operationId,
     id: input.id,
     projectId: input.projectId,
     label: input.label,
@@ -123,6 +131,8 @@ export function pushEditHistoryEntry(
   let undo = state.undo;
 
   if (
+    !entry.operationId &&
+    !previous?.operationId &&
     previous &&
     previous.coalesceKey &&
     previous.coalesceKey === entry.coalesceKey &&
@@ -145,6 +155,7 @@ export function pushEditHistoryEntry(
       const previousSnapshot = previous.files[path];
       files[path] = previousSnapshot
         ? {
+            encoding: snapshot.encoding,
             before: previousSnapshot.before,
             after: snapshot.after,
             beforeHash: previousSnapshot.beforeHash,

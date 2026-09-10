@@ -1,3 +1,4 @@
+import type { ElementFiles } from "../ari/elementOperations";
 import type { TimelineElement } from "../player";
 import type { CompositionDimensions } from "../components/renders/RenderQueue";
 import type { FfmpegStatus } from "../components/renders/useFfmpegStatus";
@@ -5,12 +6,14 @@ import { useContext, useMemo, type ReactNode } from "react";
 import { createStableContext } from "../utils/hmrStableContext";
 
 export interface StudioShellValue {
+  elementFiles?: ElementFiles;
   projectId: string;
   activeCompPath: string | null;
   setActiveCompPath: (path: string | null) => void;
   showToast: (message: string, tone?: "error" | "info") => void;
   previewIframeRef: React.MutableRefObject<HTMLIFrameElement | null>;
   editHistory: {
+    refresh?: (readSources: () => Promise<void>) => Promise<void>;
     canUndo: boolean;
     canRedo: boolean;
     undoLabel: string | undefined;
@@ -107,6 +110,7 @@ export function StudioShellProvider({
   children: ReactNode;
 }) {
   const {
+    elementFiles,
     projectId,
     activeCompPath,
     setActiveCompPath,
@@ -124,6 +128,7 @@ export function StudioShellProvider({
 
   const stable = useMemo<StudioShellValue>(
     () => ({
+      elementFiles,
       projectId,
       activeCompPath,
       setActiveCompPath,
@@ -139,6 +144,7 @@ export function StudioShellProvider({
       handlePreviewIframeRef,
     }),
     [
+      elementFiles,
       projectId,
       activeCompPath,
       compositionDimensions,

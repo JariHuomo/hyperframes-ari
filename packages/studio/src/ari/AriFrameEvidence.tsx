@@ -21,13 +21,13 @@ export function AriFrameEvidence({ call }: { call: AriCallReceipt | null }) {
     <div className="mb-3 text-sm">
       <p className={stale ? "text-amber-300" : "text-emerald-200"}>
         {stale ? "Ruutukuva vanhentunut — tarkista uudelleen" : "Tallennettu ruutukuva"} ·{" "}
-        {frame.time.toFixed(2)} s
+        {frame.time.toFixed(2).replace(".", ",")} s
       </p>
       {!stale && (
         <a href={frame.url} target="_blank" rel="noreferrer">
           <img
             src={frame.url}
-            alt={`Renderöity ruutu kohdassa ${frame.time.toFixed(2)} sekuntia`}
+            alt={`Renderöity ruutu kohdassa ${frame.time.toFixed(2).replace(".", ",")} sekuntia`}
             className="mt-2 max-h-36 rounded object-contain"
           />
         </a>

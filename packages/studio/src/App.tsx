@@ -39,7 +39,7 @@ import { useCompositionContentLoader } from "./hooks/useCompositionContentLoader
 import { useStudioUrlState } from "./hooks/useStudioUrlState";
 import { useEffectiveTimelineDuration } from "./hooks/useEffectiveTimelineDuration";
 import {
-  buildStudioContextValue,
+  useStudioContextValue,
   useGlobalFileDrop,
   useInspectorState,
 } from "./hooks/useStudioContextValue";
@@ -84,7 +84,8 @@ export function StudioApp() {
   const activeCompPathRef = useRef(activeCompPath);
   activeCompPathRef.current = activeCompPath;
   const leftSidebarRef = useRef<LeftSidebarHandle>(null);
-  const renderQueue = useRenderQueue(projectId, activeCompPathRef);
+  const renderSaveBarrier = useRef(async () => {});
+  const renderQueue = useRenderQueue(projectId, activeCompPathRef, renderSaveBarrier);
   const captionEditMode = useCaptionStore((s) => s.isEditMode);
   const captionHasSelection = useCaptionStore((s) => s.selectedSegmentIds.size > 0);
   const captionSync = useCaptionSync(projectId);
@@ -141,6 +142,7 @@ export function StudioApp() {
     activeCompPathRef,
     reloadPreview: () => setRefreshKey((k) => k + 1),
   });
+  renderSaveBarrier.current = previewPersistence.waitForPendingDomEditSaves;
   const externalFileChanges = useStudioExternalFileChanges({
     projectId,
     activeCompPath,
@@ -230,6 +232,7 @@ export function StudioApp() {
     previewIframeRef,
   });
   const appHotkeys = useAppHotkeys({
+    projectId,
     handleTimelineElementsDelete: timelineEditing.handleTimelineElementsDelete,
     handleTimelineElementSplit: timelineEditing.handleTimelineElementSplit,
     handleDomEditElementDelete: domEditDeleteBridge,
@@ -416,7 +419,7 @@ export function StudioApp() {
     setRightPanelTab: panelLayout.setRightPanelTab,
     initialState: initialUrlStateRef.current,
   });
-  const studioCtxValue = buildStudioContextValue({
+  const studioCtxValue = useStudioContextValue({
     projectId: projectId!,
     activeCompPath,
     setActiveCompPath,
@@ -472,12 +475,7 @@ export function StudioApp() {
                     capturing={frameCapture.capturing}
                     inspectorButtonActive={inspectorButtonActive}
                     inspectorPanelActive={inspectorPanelActive}
-                    onExport={() => {
-                      void (async () => {
-                        await previewPersistence.waitForPendingDomEditSaves();
-                        await renderQueue.startRender(undefined);
-                      })();
-                    }}
+                    onExport={() => void renderQueue.startRender(undefined)}
                   />
                   {previewPersistence.domEditSaveQueuePaused && !externalFileChanges.blocked && (
                     <SaveQueuePausedBanner

@@ -1,3 +1,4 @@
+import { findElementForSelection } from "../../components/editor/domEditingElement";
 /**
  * `studio_select` and `studio_seek`: pointing the human and the agent at the
  * same thing.
@@ -98,9 +99,14 @@ export async function studioSelect(
     );
   }
 
-  const { selection } = resolved;
+  let { selection } = resolved;
   const scene = resolveSelectedInstance(deps, selection, instance);
   if (scene && "ok" in scene) return scene;
+  if (scene?.instance) {
+    const placed = await selectPlacedElement(deps, selection, scene.instance);
+    if ("ok" in placed) return placed;
+    selection = placed;
+  }
   deps.applySelection(selection);
   return toolOk<StudioSelectResult>({
     handle,
@@ -109,6 +115,23 @@ export async function studioSelect(
     box: selection.boundingBox,
     ...(scene ? { scene } : {}),
   });
+}
+
+async function selectPlacedElement(
+  deps: SelectionToolDeps,
+  selection: DomEditSelection,
+  instance: string,
+): Promise<DomEditSelection | ToolFailure> {
+  const doc = deps.getPreviewDocument();
+  const element =
+    doc &&
+    findElementForSelection(doc, { ...selection, instanceId: instance }, deps.getCompositionPath());
+  if (!element)
+    return toolFailure("blocked", "Valitun esiintymän kuva ei ole vielä käytettävissä.");
+  const placed = await deps.buildSelection(element);
+  if (!placed || deps.getPreviewDocument() !== doc || !element.isConnected)
+    return toolFailure("blocked", "Esikatselu vaihtui valinnan aikana.");
+  return { ...placed, instanceId: instance };
 }
 
 /**
@@ -270,6 +293,8 @@ export const STUDIO_SEEK_DESCRIPTION = [
 
 function selectedSceneInstance(described: SceneDescription, sourceFile: string, instance: unknown) {
   let chosen = sceneInstanceChoice.forSource(sourceFile);
+  if (chosen && !described.instances.some((candidate) => candidate.hostId === chosen))
+    chosen = null;
   if (instance !== undefined && instance !== null) {
     const validated = explicitInstance(described, sourceFile, instance);
     if (typeof validated !== "string") return validated;

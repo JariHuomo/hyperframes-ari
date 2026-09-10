@@ -87,7 +87,8 @@ export function createProjectSignatureCache({
       // Filtered here rather than at the watcher so no caller can wire up a
       // subscription that forgets to: the cache owns what can change its value.
       for (const projectDir of signatures.keys()) {
-        if (affectsProjectSignature(projectDir, changedPath)) signatures.delete(projectDir);
+        if (projectDir === resolve(changedPath) || affectsProjectSignature(projectDir, changedPath))
+          signatures.delete(projectDir);
       }
     },
   };
@@ -159,6 +160,7 @@ export function createViteAdapter(
     // The CLI resolves --proxy/--no-proxy against hyperframes.json before it
     // launches Vite. Direct `bun run dev` keeps the historical default-on
     // behavior when the child environment is absent.
+    authoringRoot: dataDir,
     autoProxy: resolveViteAutoProxy(process.env.HYPERFRAMES_AUTO_PROXY),
 
     // fallow-ignore-next-line complexity
@@ -247,6 +249,9 @@ export function createViteAdapter(
     getProjectSignature(projectDir: string): string {
       return signatureCache.get(projectDir);
     },
+    invalidateProjectSignature(projectDir: string) {
+      signatureCache.invalidate(projectDir);
+    },
 
     async lint(html: string, opts?: { filePath?: string }) {
       const mod = await server.ssrLoadModule("@hyperframes/core/lint");
@@ -273,6 +278,7 @@ export function createViteAdapter(
       };
 
       const snapshot = createAriRenderSnapshot(opts.project.dir);
+      state.sourceRevision = snapshot.revision;
       const startTime = Date.now();
       const removeCancelledOutput = () => {
         // User-initiated cancel: not a failure. Remove any output so the

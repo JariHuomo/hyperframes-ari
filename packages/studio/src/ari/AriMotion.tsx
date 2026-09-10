@@ -43,10 +43,6 @@ export function AriMotion({
   const instanceKey = instance?.hostId ?? "root";
   return (
     <section className="mb-4 space-y-2" aria-label="Liike">
-      <h3 className="text-sm font-semibold">Liike</h3>
-      {scene.nested && (
-        <SceneInstancePanel scene={scene} onOpenScene={() => setActiveCompPath(scene.sourceFile)} />
-      )}
       {gsapMultipleTimelines || gsapUnsupportedTimelinePattern ? (
         <p>Tämän aikajanan liikettä ei voi muokata perussäätimillä.</p>
       ) : (
@@ -74,6 +70,15 @@ export function AriMotion({
           </details>
         </>
       )}
+      {scene.nested && (
+        <details>
+          <summary className="cursor-pointer text-xs">Esiintymän valinta ja ajoitus</summary>
+          <SceneInstancePanel
+            scene={scene}
+            onOpenScene={() => setActiveCompPath(scene.sourceFile)}
+          />
+        </details>
+      )}
     </section>
   );
 }
@@ -90,7 +95,7 @@ function SceneInstancePanel({ scene, onOpenScene }: { scene: AriScene; onOpenSce
     <div className="space-y-2 rounded border border-amber-700 p-3 text-sm">
       {active ? (
         <p>
-          Kohtaus {scene.sourceFile} · esiintymä {index}/{instances.length} · pääajassa{" "}
+          Kohtaus {scene.sourceFile} · esiintymä {index}/{instances.length} · koko videossa{" "}
           {formatSceneSeconds(active.visibleStart)}–{formatSceneSeconds(active.visibleEnd)} s
           {active.playbackRate !== 1 ? ` · ${formatPlaybackRate(active.playbackRate)}` : ""}
         </p>
@@ -294,21 +299,10 @@ function MotionTimingFields({
   return (
     <>
       {" "}
-      {instance && (
-        <p className="text-xs text-neutral-300">
-          Alkaa kohtauksessa {formatSceneSeconds(ariNumber(position) || 0)} s · pääajassa{" "}
-          {formatSceneSeconds(ariNumber(master) || 0)} s
-          {instance.playbackRate !== 1 ? ` · ${formatPlaybackRate(instance.playbackRate)}` : ""}
-        </p>
-      )}
       <div className="grid grid-cols-2 gap-2">
-        <AriNumber
-          label={`${prefix} alkaa ${instance ? "kohtauksessa " : ""}(s)`}
-          value={position}
-          onChange={editLocal}
-        />
+        <AriNumber label={`${prefix} · Kohtauksessa (s)`} value={position} onChange={editLocal} />
         {instance && (
-          <AriNumber label={`${prefix} alkaa pääajassa (s)`} value={master} onChange={editMaster} />
+          <AriNumber label={`${prefix} · Koko videossa (s)`} value={master} onChange={editMaster} />
         )}
         <AriNumber label={`${prefix} kesto (s)`} value={duration} onChange={setDuration} />
       </div>
@@ -348,17 +342,20 @@ function MotionExtras({
     <>
       {" "}
       {supported && (
-        <AriEase
-          bridge={bridge}
-          handle={handle}
-          animationId={animation.id}
-          instance={instance?.hostId}
-          ease={motionEase(animation) ?? "power2.out"}
-          busy={busy}
-          index={index}
-          position={replaySpan?.position}
-          duration={replaySpan?.duration}
-        />
+        <details>
+          <summary className="cursor-pointer py-2 text-sm">Tarkat käyräsäädöt</summary>
+          <AriEase
+            bridge={bridge}
+            handle={handle}
+            animationId={animation.id}
+            instance={instance?.hostId}
+            ease={motionEase(animation) ?? "power2.out"}
+            busy={busy}
+            index={index}
+            position={replaySpan?.position}
+            duration={replaySpan?.duration}
+          />
+        </details>
       )}
       <div className="flex gap-2">
         <button
@@ -443,8 +440,7 @@ function MotionKind({
 }) {
   return animation ? (
     <p className="text-sm">
-      Liike {index + 1} · {animation.method}{" "}
-      {animation.hasOwnProperty("keyframes") ? "· avainruudut" : ""}
+      Liike {index + 1} {animation.hasOwnProperty("keyframes") ? "· avainruudut" : ""}
     </p>
   ) : (
     <label className="block text-xs">

@@ -27,7 +27,8 @@ function selection(): DomEditSelection {
   } as unknown as DomEditSelection;
 }
 
-function Harness() {
+let historyActions: ReturnType<typeof useAppHotkeys>;
+function Harness({ overrides = {} }: { overrides?: Partial<Parameters<typeof useAppHotkeys>[0]> }) {
   const selectionRef = useRef<DomEditSelection | null>(selection());
   const hotkeys = useAppHotkeys({
     handleTimelineElementsDelete: vi.fn(async () => undefined),
@@ -54,8 +55,10 @@ function Harness() {
     onResetKeyframes: vi.fn(() => false),
     onDeleteSelectedKeyframes: vi.fn(),
     onAfterUndoRedo: vi.fn(),
+    ...overrides,
   } as unknown as Parameters<typeof useAppHotkeys>[0]);
   sync = hotkeys.syncPreviewHotkeys;
+  historyActions = hotkeys;
   return null;
 }
 
@@ -91,3 +94,42 @@ describe("preview iframe hotkey forwarding", () => {
     expect(domDelete).toHaveBeenCalledTimes(1);
   });
 });
+
+it.each(["undo", "redo"] as const)(
+  "%s invalidates animation reads only after structural preview reconciliation",
+  async (direction) => {
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const syncPreview = vi.fn(() => pending);
+    const invalidate = vi.fn();
+    const apply = vi.fn(async () => ({
+      ok: true,
+      label: "Own copy",
+      paths: ["own.html"],
+      files: { "own.html": { previous: "bytes", restored: null } },
+    }));
+    root = mountReactHarness(
+      <Harness
+        overrides={{
+          editHistory: { undo: apply, redo: apply, state: { undo: [], redo: [] } } as never,
+          syncHistoryPreviewAfterApply: syncPreview,
+          onAfterUndoRedo: invalidate,
+        }}
+      />,
+    );
+    let action!: Promise<void>;
+    await act(async () => {
+      action = direction === "undo" ? historyActions.handleUndo() : historyActions.handleRedo();
+      await Promise.resolve();
+    });
+    expect(syncPreview).toHaveBeenCalledOnce();
+    expect(invalidate).not.toHaveBeenCalled();
+    await act(async () => {
+      finish();
+      await action;
+    });
+    expect(invalidate).toHaveBeenCalledOnce();
+  },
+);

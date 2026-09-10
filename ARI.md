@@ -37,7 +37,7 @@ git -c filter.lfs.process= -c filter.lfs.smudge=cat -c filter.lfs.required=false
 - **Persistent editing workspace.** Source-aware layers on the left, a large picture, properties on the right and a light timeline below. The original inspector, assets, code editor and full timeline return with “Näytä työkalupaneelit”. “Kuva isoksi” returns to the light workspace without hiding its timeline.
 - **Ari-ohjaamo.** An initially open right dock offers text, font size, colour, placement and motion controls; script arguments and technical receipts stay collapsed. Fixed-width top controls reduce moving click targets. One visible selection connects the canvas, layer list, properties and motion bars. Decimal-comma entry, actual playhead readout, undo/redo, frame capture and a labelled auto-record control support direct use. Main controls are at least 40 px high; small timeline handles have numeric alternatives.
 - **Recording off on reload.** Manual placement does not silently become a new keyframe when Studio starts. The existing timeline toggle and Ari's toggle share the same state.
-- **One command catalogue.** `window.ariStudio` calls the same twelve implementations registered with WebMCP. It works without a browser extension or an injected test harness. The panel's JSON form uses that same bridge.
+- **One command catalogue.** `window.ariStudio` calls the same eighteen implementations registered with WebMCP. It works without a browser extension or an injected test harness. The panel's JSON form uses that same bridge.
 - **Visible receipts.** Dispatched, saved, verified, partial and failed outcomes remain distinct. The last command and its actual result appear in the panel. A saved edit is not a creative-quality certificate.
 - **Source frame evidence.** “Tarkista ruutukuva” renders a PNG from the saved source, shows its exact time and returns a revision-bound URL for visual inspection. A source change makes an old evidence URL return 409 instead of silently returning different pixels. The signature uses source content and asset metadata, not immutable copies of every binary asset. Save the PNG for durable evidence. The live preview is labelled as a preview.
 - **Motion readback.** Add/update/delete/keyframe tools verify the saved source in the live Studio bridge. The receipt returns the new parser id when retiming changes it. Entrance presets bind timing, feel and properties in one save; a drag is one undo step. “Toista liike” stops at the end of the selected tween.
@@ -193,7 +193,7 @@ A host whose start, duration, `playbackStart` or `playbackRate` the manifest can
 
 ## Tool fields added this sprint
 
-The catalogue is still the same **12** names; only schemas grew, so earlier scripts keep working.
+Sprint 3 retained the original **12** names and grew their schemas. A1–A2 adds six project/media tools, and later batches add scene, refresh, notebook, review-package and review-assessment tools (36 total); the original names remain compatible.
 
 | Tool                      | New input                                                           | New output                                                                                 |
 | ------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
@@ -205,7 +205,7 @@ The catalogue is still the same **12** names; only schemas grew, so earlier scri
 | `studio_inspect`          | —                                                                   | `easeCurve`, `easeEach` per animation                                                      |
 | `studio_frame`            | `animationId` + `samples: [0.25, 0.5, 0.75]`, `instance`            | `frames[]` of `{ url, time, progress, sourceRevision }`                                    |
 
-`studio_frame` with `samples` captures several instants inside one animation's own span in a single call — the timings come from the **saved source**, not the live preview, and if the frames do not all share one revision the call fails rather than returning a "comparison" of two compositions. `url`/`time` mirror the first sample, so every existing single-frame caller is untouched. For nested motions, pass `instance`; the samples are converted to master time, including the playback rate. The panel forwards its selected occurrence. In the panel, **Vertaa edelliseen** currently replays the CURRENT motion twice with the previous curve's glyph and name beside it. It is not an A/B render; actual previous-versus-current playback remains follow-up work.
+`studio_frame` with `samples` captures several instants inside one animation's own span in a single call — the timings come from the **saved source**, not the live preview, and if the frames do not all share one revision the call fails rather than returning a "comparison" of two compositions. `url`/`time` mirror the first sample, so every existing single-frame caller is untouched. For nested motions, pass `instance`; the samples are converted to master time, including the playback rate. The panel forwards its selected occurrence. In the panel, **Vertaa edelliseen** opens the frozen-version selector described below. It no longer replays the current motion twice.
 
 ### Script example: a motion in master time, then its curve
 
@@ -275,6 +275,35 @@ const shots = await studio.call("studio_frame", {
 
 The 0.8.30 browser experiment in the AdForge workspace was useful evidence, but is not a description of every current bug: upstream 0.8.33 already has source-qualified handles, coordinated writes, twelve WebMCP tools, and a player error surface. This fork extends those seams rather than replacing the renderer.
 
+## New projects and copied images (A1–A2)
+
+Open **Uusi mainos / aineisto**. **Uusi mainos** offers a blank content scaffold (background with a soft entrance) or a product/message/CTA scaffold; both are silent 7 s 1080×1920 projects with a working local GSAP timeline. **Tarkista tiedot** shows the name, duration and actual save location before **Luo mainos**. Existing directories are refused. GSAP, MotionPathPlugin and fonts are copied from installed workspace dependencies; the templates need no CDN or font fetch.
+
+**Aineisto → Valitse kuvat** copies PNG/JPEG/WebP into the active project and displays a thumbnail shelf. Limits are 8 MiB and 16 MP per image, at most 20 selected images, one decode at a time and a 10 s decode timeout. Magic bytes, extension, full decode and symlink/path containment are checked on the server. Rejected files keep their own reasons; other successful imports survive. Closing and reopening the project does not depend on the original selected files. Placing these shelf images into a scene is A3 work.
+
+The same services are discoverable through:
+
+| Tool                     | Result / purpose                                                                                                              |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `studio_projects`        | Projects and host-owned creation options                                                                                      |
+| `studio_prepare_project` | Read-only name/template proposal with the exact `project.dir`                                                                 |
+| `studio_create_project`  | Requires proposal name, template and `location: project.dir`; returns saved file versions and a manifest version              |
+| `studio_open_project`    | Opens an id from the project list or creation receipt                                                                         |
+| `studio_import_images`   | Selected `{ name, base64 }` byte objects; per-file outcomes, copied paths, checksums and versions; no server filesystem paths |
+| `studio_images`          | Verified copied-image shelf for the active project                                                                            |
+
+No successful import means `ok: false`, `stage: "not_saved"`; a mixed batch has `partial: true`. Completed imports survive cancellation, and the remaining batch stops. Creation/import is available in the local Vite host; hosts without an approved creation root refuse creation. The report and A3–A5 source transaction contract are in [ARI-NEXT-A1-A2.md](ARI-NEXT-A1-A2.md).
+
+```sh
+# Two terminals, both foreground; no provider calls in the final acceptance path.
+npx --yes bun run ari:studio --port 3084
+npx --yes bun run ari:test:authoring
+# Recreate and measure the portable synthetic image fixtures:
+npx --yes bun run ari:measure:images
+```
+
+`ari:test:authoring` runs headed UI-only and mixed paths at 1280×800 and 1440×900 against that server. It uses the versionable synthetic fixtures, checks real source/asset bytes, deletes disposable original copies, and reopens each project. It does not yet claim the A5 finished-ad/export comparison or human UX testing.
+
 ## Verification
 
 ```sh
@@ -294,11 +323,59 @@ The Ari browser test starts an isolated local server and project copy, exercises
 
 See the delivered own-agent workflow, final video and latest tests in [ARI-SPRINT-EASY-MOTION.md](ARI-SPRINT-EASY-MOTION.md). The motion test requires the local RajaMarket prototype assets from the preceding UAT; it recreates `examples/rajamarket-sprint-mixed`, so use another copy for durable work. The curves and nested-scene-time sprint, with its UAT evidence, is [ARI-SPRINT-SCENES-CURVES.md](ARI-SPRINT-SCENES-CURVES.md). See the preceding ad workflow in [ARI-UAT-RAJAMARKET.md](ARI-UAT-RAJAMARKET.md), and [ARI-VALIDATION.md](ARI-VALIDATION.md) for the observed results and remaining findings. These are engineering tests, not an advertising or audio-quality review.
 
+## Frozen version comparison (B3–B5)
+
+**Versiot / vertailu** opens named checkpoints and the project history. **Tallenna tarkistusversio** waits for pending source writes and saves the local source/dependency manifest. Select **Edellinen versio** and **Nykyinen versio**, then **Avaa vertailu**. Both pictures use the same aspect ratio and a shared clock from zero to the shorter version's duration; different aspect ratios refuse. **Säilytä muutos** closes without writing. **Palauta edellinen** is a separate, single undoable source restore, bound to the active revision captured when comparison opened. A later edit refuses restoration until comparison is reopened.
+
+The viewer compiles checked frozen bytes in a disposable local directory. It inlines dependencies, uses an opaque-origin `sandbox="allow-scripts"` iframe and a restrictive content policy: no network connections, forms, child frames or access to Studio's document. Playback uses the bundled HyperFrames runtime; no live-project URL supplies a missing asset. Missing/corrupt/deleted checkpoints refuse before playback. Runtime resource violations hide the affected picture and show an error. The viewport scales without overwriting authored element transforms. The current supported entry is `index.html`, with the dependency contract in [the storage report](ARI-NEXT-B-VERSION-STORE.md); dynamic loaders are not a supported replay path.
+
+| Tool                      | Contract                                                                                                                                                                                                                   |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `studio_versions`         | List frozen IDs, names, manifests and the active source revision.                                                                                                                                                          |
+| `studio_save_version`     | `{ name }` saves a named checkpoint; returns its exact ID and revision.                                                                                                                                                    |
+| `studio_compare_versions` | `{ beforeId, afterId }` opens two checked versions; receipt includes IDs, shared duration and active revision.                                                                                                             |
+| `studio_comparison`       | `{ action: "seek", time }`, `play`, `pause`, `keep` or `restore`. Restore returns `restoredFrom`, `revision`, `paths`, `stage: "saved"` and `previewReady`. A preview failure never rewrites this as a failed source save. |
+
+```js
+const saved = await ariStudio.call("studio_save_version", { name: "Lähtökohta" });
+// Make an edit through Studio's visible controls or its editing tools.
+const next = await ariStudio.call("studio_save_version", { name: "Uusi versio" });
+await ariStudio.call("studio_compare_versions", {
+  beforeId: saved.version.id,
+  afterId: next.version.id,
+});
+await ariStudio.call("studio_comparison", { action: "seek", time: 1 });
+await ariStudio.call("studio_comparison", { action: "keep" });
+```
+
+`npx --yes bun run ari:test:comparison` runs the headed two-size UI-only/mixed acceptance. The `reopen` phase runs against a fresh server using the preceding report. [Implementation, exact commands and evidence](ARI-NEXT-B-COMPARISON.md). These are local automation checks, not a human UX study or release approval.
+
+## Project notebook (D1/D3)
+
+**Muistikirja** opens the project's durable goal, agreed copy, selected image references, manual **Tehty / Kesken / Seuraavaksi** tasks and observations. **Päivitä tilanne** reloads a conflicting notebook while preserving the draft. It does not refresh or replace the ad's undo stack.
+
+Discover `studio_notebook` and `studio_update_notebook` in the current 36-tool registry. The read returns a notebook token and source revision; every update binds `expectedToken`. Observations additionally bind the read source revision and declare author, author type and coverage. A technical check is explicitly labelled **Tekninen tarkistus**. Older observations remain recorded and show **Aiemman version havainto** after reading a changed source.
+
+```js
+const book = await window.ariStudio.call("studio_notebook");
+if (!book.ok) throw new Error(book.reason);
+const receipt = await window.ariStudio.call("studio_update_notebook", {
+  action: "brief",
+  expectedToken: book.token,
+  goal: "Näytä tuote selkeästi.",
+  texts: "Pieni tauko.",
+});
+if (!receipt.ok) throw new Error(receipt.reason);
+// receipt.stage === "notebook_saved"; sourceChanged === false
+```
+
+The notebook lives in `.ari-notebook/notebook.json`, outside export/version inputs and source-change broadcasts. A manual completed task does not prove a source write. Actual source-operation receipts now live in a separate durable journal. **Jatka työtä** / `studio_resume_work` resolves them without repeating writes; uncertainty refuses replay. Element/scene operations, ordinary text/style and supported motion edits share the tracked source path. Rich text, imports, binary restores and legacy animated-position edits remain outside that scope. See [supported operations, protocol and evidence](ARI-NEXT-D-OPERATIONS.md). D4 is partial (see below) and D5–D7 remain open. [Interface, limits and actual evidence](ARI-NEXT-D-NOTEBOOK.md). `ari:test:notebook` runs both visible paths at both viewport sizes; its separate reopen phase uses a fresh server and browser.
+
 ## Next steps toward an autonomous ad maker
 
 1. **Reliable observations.** Evidence is now bound to the project signature and rejects watcher/render races. The retained 150 ms wait is only scheduling mitigation. The source-frame panel now marks old evidence stale, and MP4 export has isolated asset snapshots. A visible live-preview revision and a permanent revision archive remain future work.
 2. **Precise motion transactions.** New effects now use the passed playhead on the currently open source timeline, with a one-second default duration. Master-to-nested-source insertion now converts through the runtime's own formula when the placement is unambiguous or named, and still refuses with an instruction to open the scene when it is not. Speed-ramped and trimmed scenes remain future work. Motion receipts now perform source readback; visual verification remains separate. Audit loop insertion and existing-keyframe conversion separately before promising arbitrary GSAP round trips.
-3. **Durable task runner.** Persist the brief, approved assets/copy, steps, checkpoints, action receipts, revision hashes, screenshots and bounded retries. Run model reasoning outside the editor through a provider adapter with a declared budget. Do not claim autonomous reasoning because a command console exists.
+3. **Durable task runner.** The notebook now persists the brief, selected asset checksums, agreed copy, manual tasks and attributed observations. Verified source-operation receipts and read-only resumption are available for the documented source paths. Review packages and bounded correction rounds remain future work. Run model reasoning outside the editor through a provider adapter with a declared budget. Do not claim autonomous reasoning because a command console exists.
 4. **Visual critique loop.** Review beginning/middle/end and every changed boundary, then compare the actual rendered video. Assess the idea, copy, design, motion and sound separately. Geometry checks cannot certify meaning or persuasive quality.
 5. **Production handoff.** Connect stable compositions to Ari's factory through versioned templates and its real price/approval/release gates. This standalone fork neither charges AdForge credits nor bypasses customer output reviews.
 
@@ -307,3 +384,148 @@ The intended loop is: brief → script/asset plan → source edit → targeted U
 ## Sprint 3 closeout
 
 See [ARI-SPRINT-FINAL-UX.md](ARI-SPRINT-FINAL-UX.md) for the follow-up dispositions, reproducible UX evidence, new RajaMarket prototype, and the prioritized next sprint. Ari's layer shelf includes timed-hidden elements; source reload and minted IDs preserve the exact selection. Curve-only edits validate the owned motion span, not the current playhead.
+
+## Review packages and assessments (D4)
+
+The **Tarkistus** section's **Tarkistuspaketti** prepares and shows one frozen version's review material: the whole MP4, its first and last frame, and the before/at/after frames around every changed motion boundary against a chosen previous frozen version. Choose the version and the optional comparison version, press **Valmistele tarkistuspaketti**, and the state line reports _kesken_, _valmis_ or _epäonnistui_. Preparation renders locally and takes about as long as an export; a failed attempt publishes nothing and can be repeated. Every boundary is labelled with the version and time it came from, an out-of-video frame says so instead of vanishing, and the coverage sentence names exactly what was and was not sampled.
+
+The panel says in Finnish that a prepared package is material to look at — **its completion is not evidence that anyone watched the video, and it is not a quality approval.**
+
+Below it, **Arviot** records what a named reviewer actually said, in four separate categories: **viesti, ulkoasu, liike, ääni**. Each row carries the reviewer, the reviewer type (_Ihmisen kirjaama_, _Ulkoisen agentin kirjaama_, _Testiaineisto_), the time, the package and frozen version it looked at, and the coverage the reviewer declared — whether the whole video was watched and which boundaries were inspected. A category nobody assessed reads **puuttuu** and says so: a missing assessment is never an approval. The technical measurement sits in its own line and never fills a category; a render with no audio stream reports that as a measurement and **leaves the audio assessment missing**. After a real source edit an older assessment stays in history and is shown **vanhentunut** with its reason. Recording an assessment writes only the project notebook — no source revision, no version index, no undo stack — and is still not a release approval; that is D7.
+
+Discover `studio_prepare_review_package`, `studio_list_review_packages`, `studio_read_review_package`, `studio_record_review_assessment` and `studio_read_review_assessments` in the current 36-tool registry. They call the same service the visible path uses, and every read returns the server-verified manifest plus `assetUrls` into the confined package route; nothing else in the package directory is served.
+
+```js
+const versions = await window.ariStudio.call("studio_versions");
+const [before, after] = versions.versions.slice(-2);
+const prepared = await window.ariStudio.call("studio_prepare_review_package", {
+  versionId: after.id,
+  previousVersionId: before.id,
+});
+if (!prepared.ok) throw new Error(prepared.reason);
+// prepared.package.coverage === "changed-motion-boundaries"
+// prepared.viewed === false; prepared.approved === false
+// prepared.assetUrls.video → /api/ari/projects/<id>/review/<pkg>/asset?path=video.mp4
+
+const before = await window.ariStudio.call("studio_read_review_assessments");
+// before.packages[0].categories → four rows, every status "missing"
+const recorded = await window.ariStudio.call("studio_record_review_assessment", {
+  packageId: prepared.package.id,
+  expectedToken: before.token, // conditional: a concurrent reviewer's row is never lost
+  category: "motion",
+  reviewer: "Jari",
+  reviewerType: "human", // there is no "technical": a measurement is not a judgement
+  verdict: "fix",
+  text: "Otsikko lähtee liikkeelle ennen taustaa.",
+  wholeVideoWatched: true,
+  checkedBoundaries: "all", // or indexes into prepared.package.boundaries
+});
+// recorded.approved === false — an assessment is an opinion, not a release
+// recorded.packages[0].categories.at(-1) → { category: "audio", status: "missing" }
+```
+
+Preparation changes no source revision, no version index and no undo stack, and a published package keeps working after its own frozen version loses a dependency. `ari:test:review` runs the visible and mixed paths at both viewport sizes, records three categories, leaves audio alone, edits the source and checks that every recorded assessment ages without being lost; its `reopen` phase re-reads the same packages and assessments from a fresh server and browser. [Interface, limits and actual evidence](ARI-NEXT-D-REVIEW-PACKAGE.md). D5–D7 remain open, and nothing here claims a human watched anything.
+
+## Repair rounds and approved copy (D5)
+
+**Muistikirja › Hyväksytty sisältö ja korjauskierrokset** is where the ad's owner decides two things: how many repair rounds one task may spend (product default **two**, changeable per project), and which agreed sentences are locked. Both are enforced on the shared write path, not on a button: `prepareSourceOperation` refuses **before** the intent is published, so the visible controls and the agent tools meet exactly the same refusal.
+
+- A tracked source write consumes a repair round only while a task is named in **Korjauskierroksia käyttävä tehtävä**. Rounds are one file per consumed round under `.ari-notebook/repairs/`, so the count survives a restart with no cache.
+- When the rounds run out the refusal names the task, the count, the recorded **jäljellä oleva puute** and the **seuraava ehdotus**, and says the decision is yours: `Päätä jatkosta itse; automaattista jatkoa ei ole.` There is no automatic continuation and no model call anywhere in this path.
+- A lock is compared **mechanically**: the exact agreed string with whitespace normalised. A write is refused when it lowers that string's occurrence count in any file it touches; a task may be given an explicit mandate over one named lock, and only that lock.
+- A refusal writes nothing: no source byte, no version index entry, no undo entry. It leaves a receipt in `.ari-notebook/refusals.json`, listed under **Torjutut muutokset** and returned by `studio_notebook`.
+- The protection reaches exactly as far as the tracked write path does. Image imports, binary version restores, rich text and legacy animated-position edits stay outside it, and the panel says so.
+
+```js
+const book = await window.ariStudio.call("studio_notebook");
+const task = book.notebook.tasks[0];
+await window.ariStudio.call("studio_update_notebook", {
+  action: "lock",
+  expectedToken: book.token,
+  label: "Pääviesti",
+  text: "Pieni tauko.",
+});
+const active = await window.ariStudio.call("studio_notebook");
+await window.ariStudio.call("studio_update_notebook", {
+  action: "active_repair",
+  expectedToken: active.token,
+  id: task.id,
+});
+// active.repair → { limit: 2, activeTaskId, tasks: [{ id, used, exhausted, remaining, suggestion }], refusals: [] }
+// A third round, or any edit dropping "Pieni tauko.", now fails with a Finnish reason.
+```
+
+The registry still holds **36** tool names: `studio_update_notebook` gained the `repair_limit`, `active_repair`, `repair_plan`, `lock`, `unlock` and `authority` actions rather than six new tools. `ari:test:repair` runs the visible and mixed paths at both viewport sizes and its `reopen` phase re-checks the counter and the locks from a fresh server and browser. [Interface, limits and actual evidence](ARI-NEXT-D5-D7.md).
+
+## Stopping the work and approving a version locally (D6–D7)
+
+**Muistikirja › Työn pysäytys** stops the work, and **Muistikirja › Version hyväksyntä** decides
+about one frozen version. Both are notebook facts, and both are enforced where it counts.
+
+- **Pysäytä työ** records who stopped it, when and why. `assertOperationAllowed` then refuses the
+  **next** tracked source write with that Finnish reason — from the panel and from the agent tools
+  alike — and leaves a receipt beside the D5 refusals. Nothing else moves: no source byte, no
+  version index entry, no undo entry.
+- An operation whose intent was already published is **written to completion**, so a save never
+  ends half-way. Its bytes live in that immutable intent and its writes are conditional; tearing it
+  down would orphan the intent and leave `Jatka työtä` reporting it as uncertain for good. The stop
+  is a gate on the next write, not a kill switch on the current one.
+- The notebook, its observations, the assessments and the approvals stay writable while stopped —
+  they are not source writes, and the panel says so. **Jatka työtä** in the stop block releases the
+  write path with no reopen and no reload; its accessible name is _Jatka pysäytettyä työtä_, because
+  the operation-resume control above it is also called _Jatka työtä_.
+- **Hyväksy versio paikallisesti** binds `versionId`, the review package id, the package's source
+  revision, a named decider and a non-technical role (`human`, `external_agent` or `test_data`).
+  Approving requires a review package that still reads and a stated position on **all four**
+  assessment categories: an assessment, or an explicit _ei sovellu_ with a reason. A technical
+  measurement never fills one, so a silent render can never approve itself.
+- **Hylkää versio** needs neither a package nor assessments. A rejected version stays rejected —
+  move on with a new version.
+- A later source change ages the approval through the same `source_changed` rule the assessments
+  use: it is shown as **Vanhentunut** with its reason and stays in history.
+- A local MP4 export is **always** allowed. What changes is what the receipt calls it: _Hyväksytty
+  versio_ when the exported revision carries a standing approval, _Luonnos, ei hyväksytty_
+  otherwise. Either way it says the file is a local draft and **not a customer release**. This fork
+  creates no customer approval and publishes nothing.
+
+The registry still holds **36** tool names. `studio_update_notebook` gained the `stop_work`,
+`resume_work` and `approval` actions, and `studio_notebook` now returns `repair.stop`,
+`repair.stopHistory`, `approvals`, `currentApproval`, `approvedRevisions` and `export`.
+
+```js
+const book = await window.ariStudio.call("studio_notebook");
+await window.ariStudio.call("studio_update_notebook", {
+  action: "stop_work",
+  expectedToken: book.token,
+  by: "Ulkoinen agentti",
+  byType: "external_agent",
+  reason: "Odotetaan asiakkaan hintaa",
+});
+// Every tracked source write now fails with "Työ on pysäytetty: …".
+const stopped = await window.ariStudio.call("studio_notebook");
+await window.ariStudio.call("studio_update_notebook", {
+  action: "resume_work",
+  expectedToken: stopped.token,
+  by: "Ulkoinen agentti",
+  byType: "external_agent",
+  reason: "Hinta saatu",
+});
+const ready = await window.ariStudio.call("studio_notebook");
+const decision = await window.ariStudio.call("studio_update_notebook", {
+  action: "approval",
+  expectedToken: ready.token,
+  versionId,
+  packageId,
+  decision: "approved",
+  approver: "Ulkoinen agentti",
+  approverType: "external_agent",
+  note: "Katsoin koko videon ja molemmat rajat.",
+  notApplicable: [{ category: "audio", reason: "Mainoksessa ei ole ääntä." }],
+});
+// decision.currentApproval → the standing approval, or null
+// decision.export → { revision, approved, release: "local_draft", note }
+```
+
+`ari:test:stop` runs the visible and mixed paths at both viewport sizes, and its `reopen` phase
+re-reads the stop history and the aged approval from a fresh server and browser.
+[Interface, limits and actual evidence](ARI-NEXT-D5-D7.md). **No human test was performed.**

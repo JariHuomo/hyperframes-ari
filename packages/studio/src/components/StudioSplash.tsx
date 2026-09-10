@@ -1,6 +1,8 @@
+import { AriProjectStart } from "../ari/AriProjectStart";
 export function StudioSplash({ waiting }: { waiting?: boolean }) {
   return (
-    <div className="h-full w-full bg-neutral-950 flex items-center justify-center">
+    <div className="h-full w-full bg-neutral-950 flex items-center justify-center gap-6">
+      <AriProjectStart />
       {waiting ? (
         <div className="flex flex-col items-center gap-3 text-center px-6" role="status">
           <div className="w-4 h-4 rounded-full border-2 border-neutral-700 border-t-neutral-500 animate-spin motion-reduce:animate-none" />

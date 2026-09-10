@@ -122,6 +122,7 @@ export function useDomEditSession({
     domEditSelectionRef,
     domEditGroupSelectionsRef,
     setActiveGroupElement,
+    selectionRevisionRef,
     applyDomSelection,
     clearDomSelection,
     buildDomSelectionFromTarget,
@@ -179,11 +180,8 @@ export function useDomEditSession({
     previewDocumentVersion,
     refreshDomEditSelectionFromPreview,
   });
-  // ── GSAP cache (hoisted so both useGsapScriptCommits and useDomEditWiring share the same instance) ──
 
   const { version: gsapCacheVersion, bump: bumpGsapCache } = useGsapCacheVersion();
-
-  // ── GSAP script commits ──
 
   const {
     commitMutation: gsapCommitMutation,
@@ -221,8 +219,6 @@ export function useDomEditSession({
     writeProjectFile,
     forceReloadSdkSession,
   });
-
-  // ── DOM commit handlers ──
 
   const {
     resolveImportedFontAsset,
@@ -321,8 +317,6 @@ export function useDomEditSession({
       : undefined,
   });
 
-  // ── Element groups (wrap selected elements in a data-hf-group div) ──
-
   const { groupSelection, ungroupSelection } = useGroupCommits({
     activeCompPath,
     showToast,
@@ -391,8 +385,6 @@ export function useDomEditSession({
     void ungroupSelection(sel);
   }, [domEditSelectionRef, ungroupSelection, setActiveGroupElement, showToast]);
 
-  // ── Wiring: selection sync, GSAP cache, preview sync, selection handlers ──
-
   const {
     onClickToSource,
     selectedGsapAnimations,
@@ -420,6 +412,7 @@ export function useDomEditSession({
     handleGsapRemoveAllKeyframes,
     handleResetSelectedElementKeyframes,
   } = useDomEditWiring({
+    selectionRevisionRef,
     // fallow-ignore-next-line code-duplication
     projectId,
     activeCompPath,
@@ -442,24 +435,26 @@ export function useDomEditSession({
     openSourceForSelection,
     selectSidebarTab,
     getSidebarTab,
-    updateGsapProperty,
-    updateGsapMeta,
-    deleteGsapAnimation,
-    deleteAllForSelector,
-    addGsapAnimation,
-    addGsapProperty,
-    removeGsapProperty,
-    updateGsapFromProperty,
-    addGsapFromProperty,
-    removeGsapFromProperty,
-    addKeyframe,
-    addKeyframeBatch,
-    removeKeyframe,
-    moveKeyframe,
-    resizeKeyframedTween,
-    convertToKeyframes,
-    removeAllKeyframes,
-    handleDomManualEditsReset,
+    operations: {
+      updateGsapProperty,
+      updateGsapMeta,
+      deleteGsapAnimation,
+      deleteAllForSelector,
+      addGsapAnimation,
+      addGsapProperty,
+      removeGsapProperty,
+      updateGsapFromProperty,
+      addGsapFromProperty,
+      removeGsapFromProperty,
+      addKeyframe,
+      addKeyframeBatch,
+      removeKeyframe,
+      moveKeyframe,
+      resizeKeyframedTween,
+      convertToKeyframes,
+      removeAllKeyframes,
+      handleDomManualEditsReset,
+    },
   });
   const {
     handlePreviewCanvasMouseDown,
@@ -523,6 +518,7 @@ export function useDomEditSession({
     handlePreviewCanvasMouseDown,
     handlePreviewCanvasPointerMove,
     handlePreviewCanvasPointerLeave,
+    selectionRevisionRef,
     applyDomSelection,
     clearDomSelection,
     handleDomStyleCommit,

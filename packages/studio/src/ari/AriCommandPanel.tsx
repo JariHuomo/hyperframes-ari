@@ -8,6 +8,8 @@ import { AriExport } from "./AriExport";
 import { AriProperties } from "./AriProperties";
 import { AriMotion } from "./AriMotion";
 import { AriQuickText } from "./AriQuickText";
+import { AriPanelSections } from "./AriPanelSections";
+import { AriReview } from "./AriReview";
 
 const labels: Record<string, string> = {
   studio_look: "Lue näkymä",
@@ -61,8 +63,8 @@ export function AriCommandPanel({
     const handle = selection?.handle ?? "";
     const selectedText = selection?.text ?? "";
     const examples: Record<string, object> = {
-      studio_seek: { time: Number(time) },
-      studio_frame: { time: Number(time) },
+      studio_seek: { time: Number(time.replace(",", ".")) },
+      studio_frame: { time: Number(time.replace(",", ".")) },
       studio_select: { handle },
       studio_inspect: {},
       studio_set_text: { handle, text: selectedText },
@@ -73,12 +75,15 @@ export function AriCommandPanel({
   }
 
   return (
-    <div className="h-full space-y-4 overflow-auto border-l border-neutral-600 bg-[#202525] p-4 text-neutral-100">
-      <AriExport busy={busy} />
-      <div>
-        {selected?.handle &&
+    <div
+      data-testid="ari-command-panel"
+      className="h-full space-y-4 overflow-auto border-l border-neutral-600 bg-[#202525] p-4 text-neutral-100"
+    >
+      <AriPanelSections
+        text={
+          selected?.handle &&
           selected.text !== null &&
-          getSnapshot().selection?.textFields.length === 1 && (
+          getSnapshot().selection?.textFields.length === 1 ? (
             <AriQuickText
               key={`${selected.handle}:${selected.text}`}
               bridge={bridge}
@@ -86,13 +91,40 @@ export function AriCommandPanel({
               initialText={selected.text}
               busy={busy}
             />
-          )}
-        {selected?.handle && (
-          <>
+          ) : (
+            <p>Valitse muokattava teksti kuvasta tai tasoluettelosta.</p>
+          )
+        }
+        appearance={
+          selected?.handle ? (
             <AriProperties bridge={bridge} handle={selected.handle} busy={busy} />
+          ) : (
+            <p>Valitse kohde.</p>
+          )
+        }
+        motion={
+          selected?.handle ? (
             <AriMotion bridge={bridge} handle={selected.handle} busy={busy} />
+          ) : (
+            <p>Valitse kohde.</p>
+          )
+        }
+        review={
+          <>
+            <button
+              type="button"
+              className={button}
+              onClick={() => window.dispatchEvent(new Event("ari-open-versions"))}
+            >
+              Vertaa muutosta
+            </button>
+            <AriReview bridge={bridge} projectId={getSnapshot().projectId} />
+            <AriExport busy={busy} />
+            <AriFrameEvidence call={call} />
           </>
-        )}
+        }
+      />
+      <div>
         <details>
           <summary className="cursor-pointer py-2 text-sm">Skriptikomennot</summary>
           <label className="block text-sm">
@@ -141,7 +173,8 @@ export function AriCommandPanel({
           </details>
         </details>
       </div>
-      <div className="overflow-auto">
+      <details className="overflow-auto">
+        <summary>Tekniset tiedot ja todisteet</summary>
         <strong>Tulos ja todiste</strong>
         <p className="my-2 text-xs text-neutral-400">
           Tallennettu muutos ja kuvan laatu arvioidaan erikseen.
@@ -156,7 +189,7 @@ export function AriCommandPanel({
             {call ? JSON.stringify(call, null, 2) : "Ei vielä toimintoja."}
           </pre>
         </details>
-      </div>
+      </details>
     </div>
   );
 }

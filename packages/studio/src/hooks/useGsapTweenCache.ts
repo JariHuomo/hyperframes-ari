@@ -1,3 +1,4 @@
+import { findElementForSelection } from "../components/editor/domEditingElement";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import type { GsapAnimation, GsapKeyframesData } from "@hyperframes/core/gsap-parser";
 import { usePlayerStore } from "../player/store/playerStore";
@@ -24,6 +25,9 @@ export { fetchParsedAnimations, resolveSelectorElementIds } from "./keyframeCach
 
 /** The selected element's identity for matching tweens to it. */
 export interface GsapElementTarget {
+  hfId?: string;
+  instanceId?: string;
+  selectorIndex?: number;
   id?: string | null;
   selector?: string | null;
 }
@@ -48,6 +52,7 @@ export function getAnimationsForElement(
   element?: Element | null,
 ): GsapAnimation[] {
   const matchers = new Set<string>();
+  if (target.hfId) matchers.add(`[data-hf-id=${JSON.stringify(target.hfId)}]`);
   if (target.id) matchers.add(`#${target.id}`);
   if (target.selector) matchers.add(target.selector);
   if (matchers.size === 0 && !element) return [];
@@ -92,8 +97,8 @@ export function useGsapAnimationsForElement(
     s.domClipChildren.map((c) => `${c.id}<${c.hostId}`).join("|"),
   );
 
+  const targetKey = gsapTargetKey(target);
   useEffect(() => {
-    const targetKey = target?.id ?? target?.selector ?? "";
     const fetchKey = `${projectId}:${sourceFile}:${version}:${targetKey}`;
     if (fetchKey === lastFetchKeyRef.current) return;
     lastFetchKeyRef.current = fetchKey;
@@ -147,7 +152,7 @@ export function useGsapAnimationsForElement(
         retryTimerRef.current = null;
       }
     };
-  }, [projectId, sourceFile, version, target?.id, target?.selector]);
+  }, [projectId, sourceFile, version, targetKey]);
 
   const targetId = target?.id ?? null;
   const targetSelector = target?.selector ?? null;
@@ -157,24 +162,24 @@ export function useGsapAnimationsForElement(
     // gsap.from(".dot", {stagger})) attribute to every matching element, not
     // just the one whose exact selector equals the tween's. `version` re-runs
     // this after composition reloads.
-    let element: Element | null = null;
-    const doc = iframeRef?.current?.contentDocument;
-    if (doc) {
-      try {
-        element =
-          (targetId ? doc.getElementById(targetId) : null) ??
-          (targetSelector ? doc.querySelector(targetSelector) : null);
-      } catch {
-        element = null;
-      }
-    }
+    const element = liveAnimationElement(iframeRef, target, sourceFile);
     return getAnimationsForElement(
       allAnimations,
-      { id: targetId, selector: targetSelector },
+      { id: targetId, selector: targetSelector, hfId: target?.hfId },
       element,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allAnimations, targetId, targetSelector, version, iframeRef]);
+  }, [
+    allAnimations,
+    targetId,
+    targetSelector,
+    target?.hfId,
+    target?.instanceId,
+    target?.selectorIndex,
+    sourceFile,
+    version,
+    iframeRef,
+  ]);
 
   // fallow-ignore-next-line complexity
   const animations = useMemo(() => {
@@ -460,4 +465,36 @@ export function usePopulateKeyframeCacheForFile(
 
     return () => clearInterval(interval);
   }, [projectId, sourceFile, version, iframeRef]);
+}
+
+function gsapTargetKey(target: GsapElementTarget | null) {
+  return target?.hfId ?? target?.id ?? target?.selector ?? "";
+}
+function liveAnimationElement(
+  iframeRef: React.RefObject<HTMLIFrameElement | null> | undefined,
+  target: GsapElementTarget | null,
+  sourceFile: string,
+) {
+  let element: Element | null = null;
+  if (!target) return null;
+  const doc = iframeRef?.current?.contentDocument;
+  if (doc) {
+    try {
+      element = findElementForSelection(
+        doc,
+        {
+          id: target.id ?? undefined,
+          selector: target.selector ?? undefined,
+          hfId: target.hfId,
+          instanceId: target.instanceId,
+          selectorIndex: target.selectorIndex,
+          sourceFile,
+        },
+        sourceFile,
+      );
+    } catch {
+      element = null;
+    }
+  }
+  return element;
 }

@@ -4,6 +4,8 @@ import type { SelectElementOptions, TimelineElement } from "../player";
 import type { RightPanelTab } from "../utils/studioHelpers";
 
 export interface ApplyDomSelectionOptions {
+  /** Internal preview rebind of the existing selection, not a new user choice. */
+  preserveRevision?: boolean;
   revealPanel?: boolean;
   additive?: boolean;
   preserveGroup?: boolean;
@@ -46,6 +48,7 @@ export interface UseDomSelectionReturn {
   domEditHoverSelection: DomEditSelection | null;
   activeGroupElement: HTMLElement | null;
   // Refs
+  selectionRevisionRef: MutableRefObject<number>;
   domEditSelectionRef: MutableRefObject<DomEditSelection | null>;
   domEditGroupSelectionsRef: MutableRefObject<DomEditSelection[]>;
   domEditHoverSelectionRef: MutableRefObject<DomEditSelection | null>;

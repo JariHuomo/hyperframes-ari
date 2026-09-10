@@ -176,32 +176,24 @@ function escapeCssIdentifier(value: string): string {
 
   if (value === "-") return "\\-";
 
-  let escaped = "";
-  for (let index = 0; index < value.length; index += 1) {
-    const char = value[index] ?? "";
-    const code = char.charCodeAt(0);
-    if (code === 0) {
-      escaped += "�";
-      continue;
-    }
+  return Array.from({ length: value.length }, (_, index) =>
+    escapeIdentifierCharacter(value, index),
+  ).join("");
+}
 
-    const isDigit = code >= 48 && code <= 57;
-    const isUpperAlpha = code >= 65 && code <= 90;
-    const isLowerAlpha = code >= 97 && code <= 122;
-    const isControl = (code >= 1 && code <= 31) || code === 127;
-    const isLeadingDigit = index === 0 && isDigit;
-    const isSecondDigitAfterDash = index === 1 && value.startsWith("-") && isDigit;
-    if (isControl || isLeadingDigit || isSecondDigitAfterDash) {
-      escaped += `\\${code.toString(16)} `;
-      continue;
-    }
-    if (isUpperAlpha || isLowerAlpha || isDigit || char === "-" || char === "_" || code >= 128) {
-      escaped += char;
-      continue;
-    }
-    escaped += `\\${char}`;
-  }
-  return escaped;
+function escapeIdentifierCharacter(value: string, index: number): string {
+  const char = value[index] ?? "";
+  const code = char.charCodeAt(0);
+  if (code === 0) return "�";
+  if (identifierNeedsHexEscape(value, index, code)) return `\\${code.toString(16)} `;
+  if (/[a-zA-Z0-9_-]/.test(char) || code >= 128) return char;
+  return `\\${char}`;
+}
+
+function identifierNeedsHexEscape(value: string, index: number, code: number): boolean {
+  if ((code >= 1 && code <= 31) || code === 127) return true;
+  if (code < 48 || code > 57) return false;
+  return index === 0 || (index === 1 && value.startsWith("-"));
 }
 
 export function escapeCssString(value: string): string {
@@ -262,6 +254,8 @@ function getPreferredClassSelector(el: HTMLElement): string | undefined {
 
 // fallow-ignore-next-line complexity
 export function buildElementLabel(el: HTMLElement): string {
+  const authoredLabel = el.getAttribute("data-label")?.trim();
+  if (authoredLabel) return authoredLabel;
   const compositionId = el.getAttribute("data-composition-id");
   if (compositionId && compositionId !== "main") {
     return humanizeIdentifier(compositionId);

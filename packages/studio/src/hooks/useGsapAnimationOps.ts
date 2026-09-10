@@ -1,3 +1,4 @@
+import { persistTrackedGsapEdit } from "../utils/trackedGsapEdit";
 import { motionPresetProperties, type StudioMotionOptions } from "../utils/studioMotionPreset";
 import { useCallback } from "react";
 import type { Composition } from "@hyperframes/sdk";
@@ -12,10 +13,8 @@ import {
   cutoverCommittedOrThrow,
   type CutoverDeps,
 } from "../utils/sdkCutover";
-import {
-  assignGsapTargetAutoIdIfNeeded,
-  ensureElementAddressable,
-} from "./gsapScriptCommitHelpers";
+import { ensureElementAddressable } from "./gsapScriptCommitHelpers";
+import { persistAtomicGsapAdd } from "../utils/atomicGsapAdd";
 import type { CommitMutation, SafeGsapCommitMutation } from "./gsapScriptCommitTypes";
 
 interface SdkAnimationDeps {
@@ -34,12 +33,10 @@ interface GsapAnimationOpsParams extends SdkAnimationDeps {
 }
 
 export function useGsapAnimationOps({
-  projectIdRef,
   activeCompPath,
   getClipManifest,
   commitMutation,
   commitMutationSafely,
-  showToast,
   sdkSession,
   sdkDeps,
 }: GsapAnimationOpsParams) {
@@ -49,6 +46,15 @@ export function useGsapAnimationOps({
       animationId: string,
       updates: { duration?: number; ease?: string; easeEach?: string; position?: number },
     ) => {
+      if (
+        await persistTrackedGsapEdit(
+          selection.sourceFile || activeCompPath || "index.html",
+          animationId,
+          updates,
+          sdkDeps,
+        )
+      )
+        return;
       if (sdkSession && sdkDeps) {
         const targetPath = selection.sourceFile || activeCompPath || "index.html";
         const handled = await sdkGsapTweenPersist(
@@ -71,6 +77,15 @@ export function useGsapAnimationOps({
 
   const deleteGsapAnimation = useCallback(
     async (selection: DomEditSelection, animationId: string) => {
+      if (
+        await persistTrackedGsapEdit(
+          selection.sourceFile || activeCompPath || "index.html",
+          animationId,
+          null,
+          sdkDeps,
+        )
+      )
+        return;
       if (sdkSession && sdkDeps) {
         const targetPath = selection.sourceFile || activeCompPath || "index.html";
         const handled = await sdkGsapTweenPersist(
@@ -157,20 +172,6 @@ export function useGsapAnimationOps({
       }
       const { selector, autoId } = ensureElementAddressable(selection);
 
-      if (autoId) {
-        const pid = projectIdRef.current;
-        const targetPath = selection.sourceFile || activeCompPath || "index.html";
-        if (!pid) throw new Error("Projektia ei ole avattu.");
-        const assigned = await assignGsapTargetAutoIdIfNeeded({
-          projectId: pid,
-          targetPath,
-          selection,
-          autoId,
-          showToast,
-        });
-        if (!assigned) throw new Error("Kohteen tunnistetta ei voitu tallentaa.");
-      }
-
       const elStart = Number.parseFloat(selection.dataAttributes?.start ?? "0") || 0;
       const elDuration = Number.parseFloat(selection.dataAttributes?.duration ?? "1") || 1;
       const position = roundTo3(options?.position ?? localTime ?? elStart);
@@ -184,28 +185,26 @@ export function useGsapAnimationOps({
         fromTo: { x: 0, y: 0, opacity: 1 },
       };
 
-      // Skip SDK path when an id was just assigned server-side (autoId): the
-      // SDK session hasn't reloaded that write yet, so persisting its
-      // serialization would clobber the new id — let the server add the tween
-      // atomically with the id it wrote.
-      if (!autoId && selection.hfId && sdkSession && sdkDeps) {
-        const targetPath = selection.sourceFile || activeCompPath || "index.html";
-        const spec = {
-          method,
-          position,
-          ...(method !== "set" ? { duration, ease: options?.ease ?? "power2.out" } : {}),
-          properties: toDefaults[method] ?? { opacity: 1 },
-          ...(method === "fromTo" ? { fromProperties: { opacity: 0 } } : {}),
-        };
-        const handled = await sdkGsapTweenPersist(
-          targetPath,
-          { kind: "add", target: selection.hfId, spec },
-          sdkSession,
+      // Both Ari's controls and agent tools use this one candidate/write/history
+      // boundary, including nested source files and newly minted DOM ids.
+      if (sdkDeps && selection.hfId) {
+        await persistAtomicGsapAdd(
+          selection,
+          autoId,
+          {
+            method,
+            position,
+            ...(method !== "set" ? { duration, ease: options?.ease ?? "power2.out" } : {}),
+            properties: toDefaults[method] ?? { opacity: 1 },
+            ...(method === "fromTo" ? { fromProperties: { opacity: 0 } } : {}),
+          },
+          selection.sourceFile || activeCompPath || "index.html",
           sdkDeps,
-          { label: `Add GSAP ${method} animation` },
         );
-        if (cutoverCommittedOrThrow(handled)) return;
+        return;
       }
+      if (autoId)
+        throw new Error("Kohdetta ei voi tallentaa turvallisesti. Valitse kohde uudelleen.");
 
       await commitMutation(
         selection,
@@ -222,7 +221,7 @@ export function useGsapAnimationOps({
         { label: `Add GSAP ${method} animation`, softReload: true },
       );
     },
-    [activeCompPath, commitMutation, getClipManifest, projectIdRef, showToast, sdkSession, sdkDeps],
+    [activeCompPath, commitMutation, getClipManifest, sdkDeps],
   );
 
   type KeyframeEntry = {

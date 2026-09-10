@@ -1,3 +1,8 @@
+import { AriNotebook } from "./AriNotebook";
+import { AriVersions } from "./AriVersions";
+import { AriScenes } from "./AriScenes";
+import { AriElements } from "./AriElements";
+import { AriProjects } from "./AriProjects";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { usePlayerStore } from "../player";
@@ -55,7 +60,8 @@ export function AriControlPanel({
   const [time, setTime] = useState("0");
   const pausedTime = usePlayerStore((state) => (state.isPlaying ? null : state.currentTime));
   useEffect(() => {
-    if (pausedTime !== null) setTime(String(Math.round(pausedTime * 1000) / 1000));
+    if (pausedTime !== null)
+      setTime(String(Math.round(pausedTime * 1000) / 1000).replace(".", ","));
   }, [pausedTime]);
   const { writeBlockedReason, editHistory, handleUndo, handleRedo } = useStudioShellContext();
   const keyframes = usePlayerStore((state) => state.autoKeyframeEnabled);
@@ -92,9 +98,10 @@ export function AriControlPanel({
         >
           {focusMode ? "Näytä työkalupaneelit" : "Kuva isoksi"}
         </button>
+        {bridge && <AriStructureButtons bridge={bridge} snapshot={getSnapshot()} />}
         <AriSelection />
         <label className="flex items-center gap-2 text-sm">
-          Aika (s)
+          Koko videossa (s)
           <input
             aria-label="Aika sekunteina"
             className="w-20 rounded border border-neutral-500 bg-neutral-900 p-2"
@@ -216,7 +223,7 @@ function AriPlayhead() {
   const duration = usePlayerStore((state) => state.duration);
   return (
     <span data-testid="ari-playhead">
-      Kuvassa {time.toFixed(2)} / {duration.toFixed(2)} s
+      Kuvassa {time.toFixed(2).replace(".", ",")} / {duration.toFixed(2).replace(".", ",")} s
     </span>
   );
 }
@@ -238,7 +245,10 @@ function AriStatus({
       ? receiptText(call.result)
       : "Valitse kohde kuvasta tai tasoluettelosta";
   return (
-    <div role="status" className="flex flex-wrap gap-x-6 px-4 pb-2 text-xs text-neutral-300">
+    <div
+      role="status"
+      className="flex h-12 flex-wrap content-start gap-x-6 overflow-auto px-4 pb-2 text-xs text-neutral-300"
+    >
       <AriPlayhead />
       <span>{bridge ? status : "Agenttiyhteys ei ole käytössä"}</span>
       <span>
@@ -270,4 +280,43 @@ function AriSelection() {
       </span>
     </div>
   );
+}
+
+function AriStructureButtons({
+  bridge,
+  snapshot,
+}: {
+  bridge: AriAgentBridge;
+  snapshot: StudioLookSnapshot;
+}) {
+  const look = buildStudioLook(snapshot);
+  const sourceFile = snapshot.selection?.sourceFile || snapshot.compositionPath || "index.html";
+  const selectedScene = look.ok
+    ? look.scenes.find((scene) => scene.sourceFile === sourceFile)
+    : undefined;
+  const instanceLabel = sceneInstanceLabel(selectedScene);
+  return (
+    <>
+      <AriProjects bridge={bridge} projectId={snapshot.projectId} />
+      <AriVersions bridge={bridge} projectId={snapshot.projectId} />
+      <AriNotebook bridge={bridge} projectId={snapshot.projectId} />
+      <AriScenes bridge={bridge} sourceFile={snapshot.compositionPath ?? "index.html"} />
+      <AriElements
+        bridge={bridge}
+        selectedTarget={snapshot.selection?.hfId}
+        instanceLabel={instanceLabel}
+        instance={selectedScene?.instance}
+        sourceFile={sourceFile}
+      />
+    </>
+  );
+}
+
+function sceneInstanceLabel(
+  selectedScene: { instance: string | null; instances: { hostId: string }[] } | undefined,
+) {
+  const instanceLabel = selectedScene?.instance
+    ? `${selectedScene.instances.findIndex((i) => i.hostId === selectedScene.instance) + 1}/${selectedScene.instances.length}`
+    : undefined;
+  return instanceLabel;
 }

@@ -3,8 +3,13 @@ import type { TimelineElement } from "../player";
 import type { DomEditSelection } from "../components/editor/domEditing";
 import { resolveTimelineIdForSelection } from "../utils/studioHelpers";
 import { logSelect } from "../utils/selectDebug";
+import {
+  resolveTimelineSelections,
+  timelineElementsForSelection,
+} from "./timelineSelectionPresence";
 
 interface UseTimelineSelectionPreviewSyncParams {
+  previewPending?: boolean;
   selectedElementId: string | null;
   selectedElementIds: Set<string>;
   timelineElements: TimelineElement[];
@@ -21,6 +26,7 @@ interface UseTimelineSelectionPreviewSyncParams {
       additive?: boolean;
       preserveGroup?: boolean;
       announce?: boolean;
+      preserveRevision?: boolean;
     },
   ) => void;
   applyMarqueeSelection: (selections: DomEditSelection[], additive: boolean) => void;
@@ -64,6 +70,7 @@ function anchorIsOutsideSelection(anchor: string | null, selectedIds: string[]):
 }
 
 export function useTimelineSelectionPreviewSync({
+  previewPending = false,
   selectedElementId,
   selectedElementIds,
   timelineElements,
@@ -84,20 +91,23 @@ export function useTimelineSelectionPreviewSync({
   const domEditGroupSelectionsRef = useRef(domEditGroupSelections);
   const lastSyncedSelectedKeyRef = useRef("");
   const missingSelectionKeyRef = useRef("");
+  // The list as it is now, not as it was when this effect run started: a rebuild
+  // that lands mid-wait has to be visible to the wait itself.
+  const timelineElementsRef = useRef(timelineElements);
+  timelineElementsRef.current = timelineElements;
   domEditSelectionRef.current = domEditSelection;
   domEditGroupSelectionsRef.current = domEditGroupSelections;
 
   useEffect(() => {
+    if (previewPending) return;
     const previousSelectedKey = lastSyncedSelectedKeyRef.current;
     lastSyncedSelectedKeyRef.current = selectedKey;
     const currentDomEditSelection = domEditSelectionRef.current;
     const currentDomEditGroupSelections = domEditGroupSelectionsRef.current;
-    const currentSelections =
-      currentDomEditGroupSelections.length > 1
-        ? currentDomEditGroupSelections
-        : currentDomEditSelection
-          ? [currentDomEditSelection]
-          : [];
+    const currentSelections = previewSelectionGroup(
+      currentDomEditGroupSelections,
+      currentDomEditSelection,
+    );
     const currentIds = currentSelections
       .map((selection) =>
         resolveTimelineIdForSelection(selection, timelineElements, activeCompPath),
@@ -133,16 +143,26 @@ export function useTimelineSelectionPreviewSync({
       missingSelectionKeyRef.current = selectedKey;
       onSelectionNotFound();
     };
+    // Re-resolving the same timeline identity after a preview rebuild is not
+    // new user intent and must not invalidate a pending saved-selection receipt.
+    const refreshOptions = selectionRefreshOptions(selectedKey, previousSelectedKey);
     const syncSelection = async () => {
-      const selections: DomEditSelection[] = [];
-      let resolvableCount = 0;
-      for (const id of selectedIds) {
-        const element = timelineElements.find((item) => (item.key ?? item.id) === id);
-        if (!element) continue;
-        resolvableCount += 1;
-        const selection = await buildDomSelectionForTimelineElement(element);
-        if (selection) selections.push(selection);
-      }
+      // Nothing selected listed any more, while the canvas still holds a
+      // selection: that is what an undo/redo rebuild looks like for a beat, and
+      // clearing on it dropped the selection permanently. Give the list a bounded
+      // chance to name them again; a real removal still falls through and clears.
+      const available = await timelineElementsForSelection({
+        ids: selectedIds,
+        elements: timelineElements,
+        read: () => timelineElementsRef.current,
+        cancelled: () => cancelled,
+        hasCanvasSelection: Boolean(currentDomEditSelection),
+      });
+      const { selections, resolvableCount } = await resolveTimelineSelections({
+        ids: selectedIds,
+        elements: available,
+        build: buildDomSelectionForTimelineElement,
+      });
       if (cancelled) return;
       // The store is the source of truth: applying a partial set would write that
       // shrunk set back and silently drop the members whose DOM node was not ready.
@@ -157,7 +177,7 @@ export function useTimelineSelectionPreviewSync({
         // own here and is left for the later run. Quietly, because announcing
         // the clear would deselect the clip that was just picked.
         if (anchorIsOutsideSelection(currentAnchor, selectedIds)) {
-          applyDomSelection(null, { revealPanel: false, announce: false });
+          applyDomSelection(null, { revealPanel: false, announce: false, ...refreshOptions });
         }
         return;
       }
@@ -168,9 +188,9 @@ export function useTimelineSelectionPreviewSync({
         resolved: selections.length,
       });
       if (selections.length === 0) {
-        applyDomSelection(null, { revealPanel: false });
+        applyDomSelection(null, { revealPanel: false, ...refreshOptions });
       } else if (selections.length === 1) {
-        applyDomSelection(selections[0]);
+        applyDomSelection(selections[0], refreshOptions);
       } else {
         applyMarqueeSelection(selections, false);
       }
@@ -184,6 +204,7 @@ export function useTimelineSelectionPreviewSync({
     // would let the preview-to-timeline echo cancel an in-flight timeline click.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    previewPending,
     activeCompPath,
     applyDomSelection,
     applyMarqueeSelection,
@@ -194,4 +215,13 @@ export function useTimelineSelectionPreviewSync({
     selectedKey,
     timelineElements,
   ]);
+}
+
+function selectionRefreshOptions(current: string, previous: string) {
+  return current === previous ? { preserveRevision: true } : {};
+}
+
+function previewSelectionGroup(group: DomEditSelection[], primary: DomEditSelection | null) {
+  if (group.length > 1) return group;
+  return primary ? [primary] : [];
 }

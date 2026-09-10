@@ -201,10 +201,16 @@ export async function studioInspect(
     );
   }
 
+  const currentHandle =
+    current &&
+    mintElementHandle(
+      patchTargetAddress(current, deps.getCompositionPath() ?? "index.html", deps.getProjectId()),
+    );
   const resolved = await resolveLiveHandleSelection(
     deps.getPreviewDocument,
     input.handle,
     deps.buildSelection,
+    currentHandle === input.handle ? current?.instanceId : undefined,
   );
   if (resolved.status === "preview-unavailable") {
     return toolFailure("blocked", "the preview is not mounted yet");

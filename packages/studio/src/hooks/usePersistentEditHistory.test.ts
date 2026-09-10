@@ -71,7 +71,7 @@ describe("createPersistentEditHistoryController", () => {
     expect(controller.snapshot().redoPaths).toEqual(["index.html"]);
   });
 
-  it("keeps in-memory history when storage saves fail", async () => {
+  it("rejects without advancing history when storage saves fail", async () => {
     const storage: EditHistoryStorageAdapter = {
       async get() {
         return null;
@@ -94,9 +94,9 @@ describe("createPersistentEditHistoryController", () => {
         kind: "manual",
         files: { "index.html": { before: "a", after: "b" } },
       }),
-    ).resolves.toBeUndefined();
+    ).rejects.toThrow("IndexedDB unavailable");
 
-    expect(controller.snapshot().canUndo).toBe(true);
+    expect(controller.snapshot().canUndo).toBe(false);
   });
 
   it("serializes concurrent record edits against the latest state", async () => {
@@ -293,6 +293,71 @@ describe("createPersistentEditHistoryController", () => {
     });
     expect(redo.files).toEqual({ "index.html": { previous: "OLD", restored: "NEW" } });
   });
+
+  it.each(["undo", "redo"] as const)(
+    "%s attempts every rollback after a conflict and keeps both history stacks unchanged",
+    async (direction) => {
+      const storage = createMemoryEditHistoryStorage();
+      const controller = await createPersistentEditHistoryController({
+        projectId: "rollback",
+        storage,
+        onChange: () => {},
+      });
+      const before: Record<string, string> = {
+        "a.html": "Ää\r\n",
+        "b.html": "<!-- original -->\n",
+        "c.html": "third\r\n",
+      };
+      const after = Object.fromEntries(Object.keys(before).map((p) => [p, before[p] + "edited"]));
+      const disk = { ...after };
+      const writeFile = async (p: string, c: string, expected?: string) => {
+        if (disk[p] !== expected) throw new Error("conflict");
+        disk[p] = c;
+      };
+      const readFile = async (p: string) => disk[p];
+      await controller.recordEdit({
+        label: "three files",
+        kind: "manual",
+        files: Object.fromEntries(
+          Object.keys(before).map((p) => [p, { before: before[p], after: after[p] }]),
+        ),
+      });
+      if (direction === "redo") {
+        expect((await controller.undo({ readFile, writeFile })).ok).toBe(true);
+      }
+      const original = { ...disk };
+      const history = controller.snapshot().state;
+      const persisted = await storage.get("rollback");
+      const attempts: string[] = [];
+      await expect(
+        controller[direction]({
+          readFile,
+          writeFile: async (p, c, expected) => {
+            attempts.push(p);
+            if (p === "c.html") {
+              disk["b.html"] = "external\r\n";
+              throw new Error("write failed");
+            }
+            await writeFile(p, c, expected);
+          },
+        }),
+      ).rejects.toMatchObject({
+        message: "File transaction rollback did not complete",
+        errors: [
+          expect.objectContaining({ message: "write failed" }),
+          expect.objectContaining({ message: "conflict" }),
+        ],
+      });
+      expect(attempts).toEqual(["a.html", "b.html", "c.html", "b.html", "a.html"]);
+      expect(new TextEncoder().encode(disk["a.html"])).toEqual(
+        new TextEncoder().encode(original["a.html"]),
+      );
+      expect(disk["b.html"]).toBe("external\r\n");
+      expect(disk["c.html"]).toBe(original["c.html"]);
+      expect(controller.snapshot().state).toEqual(history);
+      expect(await storage.get("rollback")).toEqual(persisted);
+    },
+  );
 
   it("rolls back files when an undo write fails partway through", async () => {
     const storage = createMemoryEditHistoryStorage();

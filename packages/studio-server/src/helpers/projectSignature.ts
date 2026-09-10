@@ -16,6 +16,8 @@ const SIGNATURE_TEXT_EXTENSIONS = new Set([
   ".tsx",
 ]);
 const SIGNATURE_EXCLUDED_DIRS = new Set([
+  ".ari-versions",
+  ".ari-notebook",
   ".cache",
   ".git",
   ".hyperframes",

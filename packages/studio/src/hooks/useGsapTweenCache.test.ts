@@ -22,6 +22,18 @@ function anim(targetSelector: string): GsapAnimation {
 describe("getAnimationsForElement", () => {
   const animations = [anim("#hero"), anim(".kicker"), anim(".kicker"), anim(".co-new")];
 
+  it("keeps Studio-authored identity tweens while a nested preview is replacing its DOM", () => {
+    const owned = anim('[data-hf-id="headline"]');
+    const other = anim('[data-hf-id="other"]');
+    expect(
+      getAnimationsForElement(
+        [owned, other],
+        { id: "scoped-headline", selector: "#scoped-headline", hfId: "headline" },
+        null,
+      ),
+    ).toEqual([owned]);
+  });
+
   it("matches tweens by element id", () => {
     const result = getAnimationsForElement(animations, { id: "hero" });
     expect(result.map((a) => a.targetSelector)).toEqual(["#hero"]);

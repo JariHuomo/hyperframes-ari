@@ -1,10 +1,11 @@
+import { useHistoryFileIO } from "./useHistoryFileIO";
+import { clearRemovedHistorySelection } from "../utils/historySelection";
 import { useCallback, useEffect, useRef } from "react";
 import { automationOwnsKey } from "./useAutomationSelectionKeyboard";
 import { usePlayerStore } from "../player";
 import type { TimelineElement } from "../player";
 import type { DomEditSelection } from "../components/editor/domEditing";
 import type { LeftSidebarHandle } from "../components/sidebar/LeftSidebar";
-import { STUDIO_MOTION_PATH } from "../components/editor/studioMotion";
 import { isTypingTarget } from "../utils/typingTarget";
 import { isEditableTarget } from "../utils/timelineDiscovery";
 import { useCaptionStore } from "../captions/store";
@@ -15,7 +16,6 @@ import {
 import { shouldIgnoreHistoryShortcut } from "../utils/studioHelpers";
 import { canSplitElement } from "../utils/timelineElementSplit";
 import { trackStudioEvent } from "../utils/studioTelemetry";
-import { serializeStudioFileMutations } from "../utils/studioFileMutationCoordinator";
 
 function iframeContentWindow(iframe: HTMLIFrameElement | null): Window | null {
   try {
@@ -81,19 +81,21 @@ function tryApplyBeatHistory(
   return true;
 }
 
-// ── Types ──
-
 interface HistoryResult {
   ok: boolean;
   reason?: string;
   label?: string;
   paths?: string[];
   /** Per-file restored/previous content, used to soft-apply the preview. */
-  files?: Record<string, { previous: string; restored: string }>;
+  files?: Record<string, { previous: string | null; restored: string | null }>;
 }
 interface HistoryFileCallbacks {
-  readFile: (path: string) => Promise<string>;
-  writeFile: (path: string, content: string) => Promise<void>;
+  readFile: (path: string) => Promise<string | null>;
+  writeFile: (
+    path: string,
+    content: string | null,
+    expectedContent?: string | null,
+  ) => Promise<void>;
   serialize?: <T>(paths: readonly string[], task: () => Promise<T>) => Promise<T>;
 }
 interface EditHistoryHandle {
@@ -106,6 +108,7 @@ interface EditHistoryHandle {
 }
 
 interface UseAppHotkeysParams {
+  projectId?: string | null;
   handleTimelineElementsDelete: (elements: TimelineElement[]) => Promise<void>;
   handleTimelineElementSplit: (element: TimelineElement, splitTime: number) => Promise<void>;
   handleDomEditElementDelete: (
@@ -117,12 +120,12 @@ interface UseAppHotkeysParams {
   editHistory: EditHistoryHandle;
   readOptionalProjectFile: (path: string) => Promise<string>;
   readProjectFile: (path: string) => Promise<string>;
-  writeProjectFile: (path: string, content: string) => Promise<void>;
+  writeProjectFile: (path: string, content: string, expectedContent?: string) => Promise<void>;
   domEditSaveTimestampRef: React.MutableRefObject<number>;
   showToast: (message: string, tone?: "error" | "info") => void;
   syncHistoryPreviewAfterApply: (restore: {
     paths?: string[];
-    files?: Record<string, { previous: string; restored: string }>;
+    files?: Record<string, { previous: string | null; restored: string | null }>;
   }) => Promise<void>;
   waitForPendingDomEditSaves: () => Promise<void>;
   leftSidebarRef: React.RefObject<LeftSidebarHandle | null>;
@@ -366,14 +369,14 @@ export function dispatchPlainKey(event: KeyboardEvent, key: string, cb: HotkeyCa
   }
 }
 
-// ── Hook ──
-
 export function useAppHotkeys({
   handleTimelineElementsDelete,
   handleTimelineElementSplit,
   handleDomEditElementDelete,
   domEditSelectionRef,
+  clearDomSelectionRef,
   editHistory,
+  projectId,
   readOptionalProjectFile,
   readProjectFile,
   writeProjectFile,
@@ -396,25 +399,13 @@ export function useAppHotkeys({
 }: UseAppHotkeysParams) {
   const previewHistoryCleanupRef = useRef<(() => void) | null>(null);
 
-  // ── Undo / Redo ──
-
-  const readHistoryFile = useCallback(
-    (path: string): Promise<string> =>
-      path === STUDIO_MOTION_PATH ? readOptionalProjectFile(path) : readProjectFile(path),
-    [readOptionalProjectFile, readProjectFile],
-  );
-  const writeHistoryFile = useCallback(
-    async (path: string, content: string): Promise<void> => {
-      domEditSaveTimestampRef.current = Date.now();
-      await writeProjectFile(path, content);
-    },
-    [domEditSaveTimestampRef, writeProjectFile],
-  );
-  const serializeHistoryFiles = useCallback(
-    <T>(paths: readonly string[], task: () => Promise<T>) =>
-      serializeStudioFileMutations(writeProjectFile, paths, task),
-    [writeProjectFile],
-  );
+  const { readHistoryFile, writeHistoryFile, serializeHistoryFiles } = useHistoryFileIO({
+    projectId,
+    readOptionalProjectFile,
+    readProjectFile,
+    writeProjectFile,
+    domEditSaveTimestampRef,
+  });
 
   const applyHistory = useCallback(
     async (direction: "undo" | "redo") => {
@@ -452,7 +443,11 @@ export function useAppHotkeys({
         return;
       }
       if (result.ok && result.label) {
-        onAfterUndoRedo?.();
+        clearRemovedHistorySelection(
+          result.files,
+          domEditSelectionRef.current?.sourceFile,
+          clearDomSelectionRef.current,
+        );
         // If the active composition was among the written files, force-reload
         // the SDK session so its in-memory doc matches the reverted content.
         // writeHistoryFile sets domEditSaveTimestampRef which activates the
@@ -462,6 +457,8 @@ export function useAppHotkeys({
           forceReloadSdkSession?.();
         }
         await syncHistoryPreviewAfterApply({ paths: result.paths, files: result.files });
+        // Structural restore clears obsolete source rows before animation readers refetch.
+        onAfterUndoRedo?.();
         showToast(`${direction === "undo" ? "Undid" : "Redid"} ${result.label}`, "info");
       }
     },
@@ -474,6 +471,8 @@ export function useAppHotkeys({
       writeHistoryFile,
       serializeHistoryFiles,
       onAfterUndoRedo,
+      domEditSelectionRef,
+      clearDomSelectionRef,
       activeCompPath,
       forceReloadSdkSession,
     ],

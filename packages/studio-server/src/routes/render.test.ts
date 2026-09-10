@@ -26,6 +26,7 @@ function createAdapter(
         id: opts.jobId,
         status: "rendering",
         progress: 0,
+        sourceRevision: "frozen-input-revision",
         outputPath: opts.outputPath,
       };
     },
@@ -432,6 +433,7 @@ describe("GET /projects/:id/renders/file/* — path safety", () => {
         id: opts.jobId,
         status: "rendering",
         progress: 0,
+        sourceRevision: "frozen-input-revision",
         outputPath: opts.outputPath,
       }),
     };
@@ -727,4 +729,21 @@ describe("POST /projects/:id/render — variables forwarding", () => {
       cleanup();
     }
   });
+});
+
+it("returns the adapter's frozen revision with the job receipt", async () => {
+  const { app, cleanup } = buildApp(vi.fn());
+  try {
+    const response = await app.request("http://localhost/projects/demo/render", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(await response.json()).toMatchObject({
+      sourceRevision: "frozen-input-revision",
+      status: "rendering",
+    });
+  } finally {
+    cleanup();
+  }
 });

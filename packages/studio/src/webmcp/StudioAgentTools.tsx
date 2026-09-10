@@ -1,3 +1,4 @@
+import { useElementReceiptSelection } from "../ari/useElementReceiptSelection";
 // Modified for Ari Studio; changes documented in /ARI.md.
 import { withGeometryReadback } from "./geometryReadback";
 import { readAnimationSource } from "./tools/animationReadback";
@@ -73,7 +74,9 @@ export function StudioAgentTools({
   layersHost?: HTMLElement | null;
   timelineHost?: HTMLElement | null;
 }) {
-  const { projectId, activeCompPath, editHistory, writeBlockedReason } = useStudioShellContext();
+  const { projectId, activeCompPath, editHistory, writeBlockedReason, elementFiles } =
+    useStudioShellContext();
+  const elementsSaved = useElementReceiptSelection();
   const {
     domEditSelection,
     activeGroupElement,
@@ -83,6 +86,7 @@ export function StudioAgentTools({
   } = useDomEditSelectionContext();
   const {
     previewIframeRef,
+    selectionRevisionRef,
     buildDomSelectionFromTarget,
     applyDomSelection,
     handleDomTextCommitForSelection,
@@ -138,6 +142,10 @@ export function StudioAgentTools({
   const deps = useMemo<StudioAgentToolsDeps>(
     () => ({
       getSnapshot,
+      getElementFiles: () => elementFiles,
+      refreshProject: editHistory.refresh,
+      elementsSaved,
+      getSelectionRevision: () => selectionRevisionRef.current,
       getPreviewDocument: () => previewIframeRef.current?.contentDocument ?? null,
       buildSelection: (element) => buildDomSelectionFromTarget(element, { exactTarget: true }),
       applySelection: (selection) => applyDomSelection(selection, { revealPanel: true }),
@@ -213,6 +221,10 @@ export function StudioAgentTools({
     }),
     [
       getSnapshot,
+      editHistory.refresh,
+      elementFiles,
+      elementsSaved,
+      selectionRevisionRef,
       previewIframeRef,
       buildDomSelectionFromTarget,
       applyDomSelection,

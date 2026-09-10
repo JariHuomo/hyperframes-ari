@@ -1,5 +1,7 @@
+import { sceneInstanceChoice } from "../webmcp/tools/animationScene";
+import { waitForPreviewSourceContent } from "./selectionSourcePresence";
 import { useState, useCallback, useRef, useEffect } from "react";
-import type { TimelineElement } from "../player";
+import { usePlayerStore, type TimelineElement } from "../player";
 import {
   getAllPreviewTargetsFromPointer,
   getPreviewTargetFromPointer,
@@ -102,9 +104,11 @@ export function useDomSelection({
     ],
   );
 
+  const selectionRevisionRef = useRef(0);
   const applyDomSelection = useCallback(
     // fallow-ignore-next-line complexity
     (selection: DomEditSelection | null, options?: ApplyDomSelectionOptions) => {
+      if (!options?.preserveRevision) selectionRevisionRef.current++;
       if (!selection) {
         logSelect("clear", { hadGroup: domEditGroupSelectionsRef.current.length });
         domEditSelectionRef.current = null;
@@ -115,6 +119,14 @@ export function useDomSelection({
         return;
       }
 
+      if (selection) {
+        const host = selection.element.closest("[data-composition-src]");
+        const instanceId = host?.getAttribute("data-hf-id") || host?.id;
+        if (instanceId) {
+          selection = { ...selection, instanceId };
+          sceneInstanceChoice.choose(selection.sourceFile, instanceId);
+        }
+      }
       const isAdditiveSelection = Boolean(options?.additive);
       const currentSelection = domEditSelectionRef.current;
       const previousGroup = domEditGroupSelectionsRef.current;
@@ -122,6 +134,7 @@ export function useDomSelection({
         !isAdditiveSelection &&
         !options?.preserveGroup &&
         previousGroup.length === 1 &&
+        currentSelection?.instanceId === selection.instanceId &&
         domEditSelectionsTargetSame(currentSelection, selection) &&
         domEditSelectionsTargetSame(previousGroup[0], selection);
       if (isRepeatedSingleSelection) {
@@ -357,6 +370,7 @@ export function useDomSelection({
   const refreshDomEditSelectionFromPreview = useCallback(
     // fallow-ignore-next-line complexity
     async (selection: DomEditSelection) => {
+      const revision = selectionRevisionRef.current;
       const iframe = previewIframeRef.current;
       let doc: Document | null = null;
       try {
@@ -365,8 +379,27 @@ export function useDomSelection({
         return;
       }
       if (!doc) return;
-
-      const element = findElementForSelection(doc, selection, activeCompPath);
+      let element = findElementForSelection(doc, selection, activeCompPath);
+      if (!element) {
+        if (!usePlayerStore.getState().timelineReady) return;
+        // The write reloaded the preview and a nested scene mounts a beat later.
+        // Absence in that gap proves nothing, and this is the only re-resolve the
+        // publisher runs per reload — so wait for the selection's own file first.
+        const mounted = await waitForPreviewSourceContent({
+          getDocument: () => {
+            try {
+              return previewIframeRef.current?.contentDocument ?? null;
+            } catch {
+              return null;
+            }
+          },
+          sourceFile: selection.sourceFile,
+          activeCompositionPath: activeCompPath,
+          stale: () => selectionRevisionRef.current !== revision,
+        });
+        if (selectionRevisionRef.current !== revision) return;
+        if (mounted) element = findElementForSelection(mounted, selection, activeCompPath);
+      }
       if (!element) {
         // Losing the primary is not losing the selection. When a group is live,
         // re-resolve it and keep whoever still exists rather than wiping the lot.
@@ -374,20 +407,22 @@ export function useDomSelection({
         logSelect("refresh-lost", {
           target: selection.selector ?? selection.id ?? null,
           group: group.length,
+          sourceFile: selection.sourceFile ?? null,
         });
         if (group.length > 1) {
           await refreshDomEditGroupSelectionsFromPreviewRef.current(group);
           return;
         }
-        applyDomSelection(null, { revealPanel: false });
+        applyDomSelection(null, { revealPanel: false, preserveRevision: true });
         return;
       }
 
       const nextSelection = await buildDomSelectionFromTarget(element, { exactTarget: true });
-      if (nextSelection) {
+      if (nextSelection && selectionRevisionRef.current === revision) {
         applyDomSelection(nextSelection, {
           revealPanel: false,
           preserveGroup: true,
+          preserveRevision: true,
         });
       }
     },
@@ -397,6 +432,7 @@ export function useDomSelection({
   const refreshDomEditGroupSelectionsFromPreview = useCallback(
     // fallow-ignore-next-line complexity
     async (selections: DomEditSelection[]) => {
+      const revision = selectionRevisionRef.current;
       const iframe = previewIframeRef.current;
       let doc: Document | null = null;
       try {
@@ -413,7 +449,7 @@ export function useDomSelection({
         const nextSelection = await buildDomSelectionFromTarget(element, { exactTarget: true });
         if (nextSelection) nextGroup.push(nextSelection);
       }
-      if (nextGroup.length === 0) return;
+      if (nextGroup.length === 0 || selectionRevisionRef.current !== revision) return;
 
       const currentSelection = domEditSelectionRef.current;
       const nextSelection =
@@ -485,6 +521,7 @@ export function useDomSelection({
   const applyMarqueeSelection = useCallback(
     // fallow-ignore-next-line complexity
     (selections: DomEditSelection[], additive: boolean) => {
+      selectionRevisionRef.current++;
       logSelect("marquee", { hits: selections.length, additive });
       if (selections.length === 0) {
         if (!additive) applyDomSelection(null, { revealPanel: false });
@@ -531,6 +568,7 @@ export function useDomSelection({
     setDomEditGroupSelections,
     setActiveGroupElement,
     // Callbacks
+    selectionRevisionRef,
     applyDomSelection,
     clearDomSelection,
     buildDomSelectionFromTarget,

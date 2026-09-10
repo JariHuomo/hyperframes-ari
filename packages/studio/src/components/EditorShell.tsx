@@ -115,6 +115,7 @@ export function EditorShell({
     applyMarqueeSelection,
   } = useDomEditActionsContext();
   const { domEditSelection, domEditGroupSelections } = useDomEditSelectionContext();
+  const timelineReady = usePlayerStore((state) => state.timelineReady);
   const selectedElementId = usePlayerStore((state) => state.selectedElementId);
   const selectedElementIds = usePlayerStore((state) => state.selectedElementIds);
   const reportTimelineSelectionNotFound = useCallback(() => {
@@ -122,6 +123,7 @@ export function EditorShell({
   }, [showToast]);
 
   useTimelineSelectionPreviewSync({
+    previewPending: !timelineReady,
     selectedElementId,
     selectedElementIds,
     timelineElements,

@@ -145,8 +145,19 @@ describe("shouldDefaultCaptureBeyondViewport", () => {
 });
 
 describe("pageContentExceedsCaptureHeight", () => {
+  it("keeps the macOS Chrome safeguard even when the DOM fits exactly", async () => {
+    const page = {
+      evaluate: vi.fn().mockResolvedValue(1920),
+      browser: () => ({ version: async () => "Chrome/153.0" }),
+    } as unknown as Page;
+    expect(await pageContentExceedsCaptureHeight(page, 1920)).toBe(process.platform === "darwin");
+  });
+
   function makeFakePageWithScrollHeight(scrollHeight: number): Page {
-    return { evaluate: vi.fn().mockResolvedValue(scrollHeight) } as unknown as Page;
+    return {
+      evaluate: vi.fn().mockResolvedValue(scrollHeight),
+      browser: () => ({ version: async () => "HeadlessChrome/153.0" }),
+    } as unknown as Page;
   }
 
   it("is false when the page fits exactly within the requested height", async () => {

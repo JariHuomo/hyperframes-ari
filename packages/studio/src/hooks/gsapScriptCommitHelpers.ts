@@ -1,9 +1,7 @@
-import { findUnsafeDomPatchValues } from "@hyperframes/core/studio-api/finite-mutation";
 import type { DomEditSelection } from "../components/editor/domEditingTypes";
 
 export { PROPERTY_DEFAULTS } from "./gsapShared";
 import { idSelector, matchesExactlyOne } from "./gsapShared";
-import { studioWriteHeaders } from "../utils/studioFileVersion";
 
 /**
  * The selector to author a NEW tween against, minting an id on the element when
@@ -42,7 +40,6 @@ export function ensureElementAddressable(selection: DomEditSelection): {
     n += 1;
     id = `${base}-${n}`;
   }
-  el.setAttribute("id", id);
   return { selector: idSelector(id), autoId: id };
 }
 
@@ -91,54 +88,4 @@ export function formatGsapMutationRejectionToast(error: GsapMutationHttpError): 
     )}${formatFieldsSuffix(body.fields)}`;
   }
   return `Couldn't save animation: ${error.message}`;
-}
-
-interface AssignAutoIdParams {
-  projectId: string;
-  targetPath: string;
-  selection: DomEditSelection;
-  autoId: string;
-  showToast?: (message: string, tone?: "error" | "info") => void;
-}
-
-export async function assignGsapTargetAutoIdIfNeeded({
-  projectId,
-  targetPath,
-  selection,
-  autoId,
-  showToast,
-}: AssignAutoIdParams): Promise<boolean> {
-  const patchBody = {
-    target: {
-      id: selection.id,
-      hfId: selection.hfId,
-      selector: selection.selector,
-      selectorIndex: selection.selectorIndex,
-    },
-    operations: [{ type: "html-attribute", property: "id", value: autoId }],
-  };
-  const unsafePatchFields = findUnsafeDomPatchValues(patchBody);
-  if (unsafePatchFields.length > 0) {
-    showToast?.("Couldn't assign element id because the patch contains invalid values", "error");
-    return false;
-  }
-  const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/file-mutations/patch-element/${encodeURIComponent(targetPath)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...studioWriteHeaders() },
-      body: JSON.stringify(patchBody),
-    },
-  );
-  if (!res.ok) {
-    showToast?.(
-      formatGsapMutationRejectionToast(
-        new GsapMutationHttpError(res.status, await readJsonResponseBody(res)),
-      ),
-      "error",
-    );
-    return false;
-  }
-  const data = (await res.json()) as { changed?: boolean };
-  return data.changed === true;
 }

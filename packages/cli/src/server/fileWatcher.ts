@@ -11,6 +11,8 @@ export interface ProjectWatcher {
 }
 
 const WATCHER_EXCLUDED_DIRS = new Set([
+  ".ari-versions",
+  ".ari-notebook",
   ".cache",
   ".git",
   ".hyperframes",

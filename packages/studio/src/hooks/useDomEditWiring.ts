@@ -22,6 +22,7 @@ export interface UseDomEditWiringParams {
   projectId: string | null;
   activeCompPath: string | null;
   domEditSelection: DomEditSelection | null;
+  selectionRevisionRef: React.MutableRefObject<number>;
   domEditSelectionRef: React.MutableRefObject<DomEditSelection | null>;
   domEditGroupSelectionsRef: React.MutableRefObject<DomEditSelection[]>;
   refreshDomEditGroupSelectionsFromPreview: (selections: DomEditSelection[]) => Promise<void>;
@@ -46,6 +47,10 @@ export interface UseDomEditWiringParams {
   selectSidebarTab?: (tab: SidebarTab) => void;
   getSidebarTab?: () => SidebarTab;
   // GSAP script commit ops (from useGsapScriptCommits)
+  operations: DomEditScriptOperations;
+}
+
+interface DomEditScriptOperations {
   updateGsapProperty: (
     sel: DomEditSelection,
     animId: string,
@@ -116,6 +121,7 @@ export function useDomEditWiring({
   projectId,
   activeCompPath,
   domEditSelection,
+  selectionRevisionRef,
   domEditSelectionRef,
   domEditGroupSelectionsRef,
   refreshDomEditGroupSelectionsFromPreview,
@@ -134,24 +140,7 @@ export function useDomEditWiring({
   openSourceForSelection,
   selectSidebarTab,
   getSidebarTab,
-  updateGsapProperty,
-  updateGsapMeta,
-  deleteGsapAnimation,
-  deleteAllForSelector,
-  addGsapAnimation,
-  addGsapProperty,
-  removeGsapProperty,
-  updateGsapFromProperty,
-  addGsapFromProperty,
-  removeGsapFromProperty,
-  addKeyframe,
-  addKeyframeBatch,
-  removeKeyframe,
-  moveKeyframe,
-  resizeKeyframedTween,
-  convertToKeyframes,
-  removeAllKeyframes,
-  handleDomManualEditsReset,
+  operations,
 }: UseDomEditWiringParams) {
   // ── Click-to-source navigation ──
 
@@ -212,7 +201,13 @@ export function useDomEditWiring({
     projectId ?? null,
     gsapSourceFile,
     domEditSelection
-      ? { id: domEditSelection.id ?? null, selector: domEditSelection.selector ?? null }
+      ? {
+          id: domEditSelection.id ?? null,
+          selector: domEditSelection.selector ?? null,
+          hfId: domEditSelection.hfId,
+          instanceId: domEditSelection.instanceId,
+          selectorIndex: domEditSelection.selectorIndex,
+        }
       : null,
     gsapCacheVersion,
     // Pass the preview iframe so class/selector tweens (e.g. `.dot`) resolve to
@@ -229,24 +224,7 @@ export function useDomEditWiring({
 
   const gsapSelectionHandlers = useGsapSelectionHandlers({
     domEditSelection,
-    updateGsapProperty,
-    updateGsapMeta,
-    deleteGsapAnimation,
-    deleteAllForSelector,
-    addGsapAnimation,
-    addGsapProperty,
-    removeGsapProperty,
-    updateGsapFromProperty,
-    addGsapFromProperty,
-    removeGsapFromProperty,
-    addKeyframe,
-    addKeyframeBatch,
-    removeKeyframe,
-    moveKeyframe,
-    resizeKeyframedTween,
-    convertToKeyframes,
-    removeAllKeyframes,
-    handleDomManualEditsReset,
+    ...operations,
     selectedGsapAnimations,
     showToast,
   });
@@ -257,6 +235,7 @@ export function useDomEditWiring({
     previewIframe,
     activeCompPath,
     captionEditMode,
+    selectionRevisionRef,
     domEditSelectionRef,
     domEditGroupSelectionsRef,
     domEditSelection,

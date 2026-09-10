@@ -1,3 +1,4 @@
+import { usePlayerStore } from "../player";
 /**
  * Side effects for syncing the DOM edit selection with the preview iframe on
  * load/refresh, and for auto-revealing source in the Code tab.
@@ -11,6 +12,7 @@ import type { PatchTarget } from "../utils/sourcePatcher";
 import { logSelect } from "../utils/selectDebug";
 
 interface UseDomEditPreviewSyncParams {
+  selectionRevisionRef: React.MutableRefObject<number>;
   previewIframe: HTMLIFrameElement | null;
   activeCompPath: string | null;
   captionEditMode: boolean;
@@ -21,7 +23,7 @@ interface UseDomEditPreviewSyncParams {
   refreshDomEditGroupSelectionsFromPreview: (selections: DomEditSelection[]) => Promise<void>;
   applyDomSelection: (
     selection: DomEditSelection | null,
-    options?: { revealPanel?: boolean; preserveGroup?: boolean },
+    options?: { revealPanel?: boolean; preserveGroup?: boolean; preserveRevision?: boolean },
   ) => void;
   buildDomSelectionFromTarget: (
     element: HTMLElement,
@@ -38,6 +40,7 @@ interface UseDomEditPreviewSyncParams {
 }
 
 export function useDomEditPreviewSync({
+  selectionRevisionRef,
   previewIframe,
   activeCompPath,
   captionEditMode,
@@ -59,9 +62,11 @@ export function useDomEditPreviewSync({
   useEffect(() => {
     if (!previewIframe) return;
 
+    let cancelled = false;
     // fallow-ignore-next-line complexity
     const syncSelectionFromDocument = async () => {
       if (captionEditMode) return;
+      const revision = selectionRevisionRef.current;
       const currentSelection = domEditSelectionRef.current;
       if (!currentSelection) return;
       let doc: Document | null = null;
@@ -76,6 +81,7 @@ export function useDomEditPreviewSync({
 
       const nextElement = findElementForSelection(doc, currentSelection, activeCompPath);
       if (!nextElement) {
+        if (!usePlayerStore.getState().timelineReady) return;
         // The selected element no longer resolves in the (re-synced) document
         // — comp/hot reload, activeCompPath swap, or post-save replacement.
         // Clear so overlay geometry isn't computed on a stale, detached node.
@@ -96,13 +102,21 @@ export function useDomEditPreviewSync({
           await refreshDomEditGroupSelectionsFromPreview(group);
           return;
         }
-        applyDomSelection(null, { revealPanel: false });
+        applyDomSelection(null, { revealPanel: false, preserveRevision: true });
         return;
       }
 
       const nextSelection = await buildDomSelectionFromTarget(nextElement, { exactTarget: true });
-      if (nextSelection) {
-        applyDomSelection(nextSelection, { revealPanel: false, preserveGroup: true });
+      if (
+        nextSelection &&
+        !cancelled &&
+        selectionRevisionRef.current === revision &&
+        previewIframe.contentDocument === doc
+      ) {
+        applyDomSelection(
+          { ...nextSelection, instanceId: currentSelection.instanceId },
+          { revealPanel: false, preserveGroup: true, preserveRevision: true },
+        );
       }
     };
 
@@ -120,9 +134,11 @@ export function useDomEditPreviewSync({
 
     previewIframe.addEventListener("load", handleLoad);
     return () => {
+      cancelled = true;
       previewIframe.removeEventListener("load", handleLoad);
     };
   }, [
+    selectionRevisionRef,
     activeCompPath,
     applyDomSelection,
     buildDomSelectionFromTarget,

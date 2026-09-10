@@ -240,6 +240,7 @@ export function isLargeRasterDomEditSelection(
 // ─── Element finders ──────────────────────────────────────────────────────────
 
 type FindElementSelection = Pick<DomEditSelection, "id" | "hfId" | "selector" | "selectorIndex"> & {
+  instanceId?: string;
   sourceFile?: string;
 };
 
@@ -250,6 +251,12 @@ export function findElementForSelection(
 ): HTMLElement | null {
   const sourceMatches = (candidate: Element): candidate is HTMLElement =>
     isHtmlElement(candidate) &&
+    (!selection.instanceId ||
+      Boolean(
+        candidate.closest(
+          `[data-hf-id="${escapeCssString(selection.instanceId)}"], [id="${escapeCssString(selection.instanceId)}"]`,
+        ),
+      )) &&
     (!selection.sourceFile ||
       getSourceFileForElement(candidate, activeCompositionPath).sourceFile ===
         selection.sourceFile);
@@ -258,14 +265,14 @@ export function findElementForSelection(
 
   if (selection.hfId) {
     const byHfId = findAll(`[data-hf-id="${escapeCssString(selection.hfId)}"]`)[0];
-    if (byHfId) return byHfId;
+    return byHfId ?? null;
   }
 
   if (selection.id) {
     // Flattened sub-compositions can repeat authored ids. getElementById returns
     // only the first document match, so filter every id match by source first.
     const byId = findAll(`[id="${escapeCssString(selection.id)}"]`)[0];
-    if (byId) return byId;
+    return byId ?? null;
   }
 
   if (!selection.selector) return null;

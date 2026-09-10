@@ -177,7 +177,11 @@ export function parseElementHandle(handle: string): ParsedHandle | null {
  * preview reload replaces the document, and a node from the destroyed one is
  * detached but still looks like an element.
  */
-export function resolveElementHandle(doc: Document, handle: string): HTMLElement | null {
+export function resolveElementHandle(
+  doc: Document,
+  handle: string,
+  instanceId?: string,
+): HTMLElement | null {
   const parsed = parseElementHandle(handle);
   if (!parsed) return null;
   return findElementForSelection(
@@ -188,6 +192,7 @@ export function resolveElementHandle(doc: Document, handle: string): HTMLElement
       selector: parsed.scheme === "sel" ? parsed.value : undefined,
       selectorIndex: parsed.scheme === "sel" ? parsed.index : undefined,
       sourceFile: parsed.sourceFile,
+      instanceId,
     },
     parsed.activeCompositionPath ?? null,
   );
@@ -219,12 +224,13 @@ export async function resolveLiveHandleSelection<T extends { element: HTMLElemen
   getPreviewDocument: () => Document | null,
   handle: string,
   buildSelection: (element: HTMLElement) => Promise<T | null>,
+  instanceId?: string,
 ): Promise<LiveHandleResolution<T>> {
   let reloadObserved = false;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const doc = getPreviewDocument();
     if (!doc) return { status: "preview-unavailable" };
-    const element = resolveElementHandle(doc, handle);
+    const element = resolveElementHandle(doc, handle, instanceId);
     if (!element) return { status: reloadObserved ? "changed" : "not-found" };
 
     const selection = await buildSelection(element);

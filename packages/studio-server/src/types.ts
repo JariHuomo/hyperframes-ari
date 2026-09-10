@@ -11,6 +11,7 @@ export interface ResolvedProject {
 
 /** Observable render job state, polled by the SSE progress handler. */
 export interface RenderJobState {
+  sourceRevision?: string;
   id: string;
   status: "rendering" | "complete" | "failed" | "cancelled";
   progress: number;
@@ -100,6 +101,8 @@ export interface StudioSelectionResponse {
  * provides its own implementation.
  */
 export interface StudioApiAdapter {
+  /** Host-approved directory for new local projects. Absent means creation is unavailable. */
+  authoringRoot?: string;
   /** List all available projects. */
   listProjects(): Promise<ResolvedProject[]> | ResolvedProject[];
 
@@ -111,6 +114,8 @@ export interface StudioApiAdapter {
 
   /** Optional: cached signature for project files that should invalidate preview frame caches. */
   getProjectSignature?: (projectDir: string) => string;
+  /** Invalidate before a synchronous source transaction; do not depend on watcher delivery. */
+  invalidateProjectSignature?: (projectDir: string) => void;
 
   /** Lint a single HTML string. */
   lint(html: string, opts?: { filePath?: string }): Promise<LintResult> | LintResult;

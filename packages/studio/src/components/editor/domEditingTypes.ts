@@ -76,6 +76,8 @@ export interface DomEditTextField {
 }
 
 export interface DomEditSelection extends PatchTarget {
+  /** Preview host identity; source writes remain source-scoped. */
+  instanceId?: string;
   element: HTMLElement;
   label: string;
   tagName: string;

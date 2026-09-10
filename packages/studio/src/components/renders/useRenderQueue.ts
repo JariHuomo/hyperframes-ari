@@ -1,3 +1,4 @@
+import { waitForStudioFileMutations } from "../../utils/studioFileMutationCoordinator";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { CanvasResolution } from "@hyperframes/parsers";
 import { trackStudioRenderStart } from "../../telemetry/events";
@@ -17,6 +18,7 @@ export interface RenderJob {
   filename: string;
   createdAt: number;
   durationMs?: number;
+  sourceRevision?: string;
 }
 
 // The CLI consumes this same source through @hyperframes/core's re-export.
@@ -76,6 +78,7 @@ export function useRenderQueue(
   // threading the value through would rebuild every callback below on each
   // composition switch.
   activeCompPathRef: { current: string | null },
+  saveBarrier?: { current: () => Promise<void> },
 ) {
   const [jobs, setJobs] = useState<RenderJob[]>([]);
   // History fetch failure — distinguished from "no renders yet" so the panel
@@ -146,6 +149,7 @@ export function useRenderQueue(
                 size: number;
                 status?: string;
                 durationMs?: number;
+                sourceRevision?: string;
               }) => ({
                 id: r.id,
                 status: (r.status === "failed" ? "failed" : "complete") as "complete" | "failed",
@@ -153,6 +157,7 @@ export function useRenderQueue(
                 filename: r.filename,
                 createdAt: r.createdAt,
                 durationMs: r.durationMs,
+                sourceRevision: r.sourceRevision,
               }),
             );
           return [...prev, ...fromServer];
@@ -191,6 +196,8 @@ export function useRenderQueue(
         return;
       }
 
+      await saveBarrier?.current();
+      await waitForStudioFileMutations();
       const fps = opts.fps ?? 30;
       const quality = opts.quality ?? "standard";
       const format = opts.format ?? "mp4";
@@ -297,12 +304,13 @@ export function useRenderQueue(
         addSessionJob(failedJob, settings);
         return;
       }
-      const { jobId } = await res.json();
+      const { jobId, sourceRevision } = await res.json();
 
       const FORMAT_EXT: Record<string, string> = { mp4: ".mp4", webm: ".webm", mov: ".mov" };
       const ext = FORMAT_EXT[format] ?? ".mp4";
       const job: RenderJob = {
         id: jobId,
+        sourceRevision,
         status: "rendering",
         progress: 0,
         filename: `${jobId}${ext}`,
@@ -360,7 +368,15 @@ export function useRenderQueue(
 
       return jobId;
     },
-    [projectId, activeCompPathRef, closeActiveEventSource, addSessionJob, ffmpeg, ffmpegMissing],
+    [
+      projectId,
+      activeCompPathRef,
+      saveBarrier,
+      closeActiveEventSource,
+      addSessionJob,
+      ffmpeg,
+      ffmpegMissing,
+    ],
   );
 
   // Cancel an in-flight render. The job row stays (as "cancelled") so the

@@ -21,18 +21,34 @@ export function AriLayers({
         // placement, so the handle alone is not a unique React key: the second
         // row was dropped and every render logged a duplicate-key warning.
         // Both rows are real placements, so they are kept and keyed by position.
-        look.elements.map((e, index) => (
-          <button
-            key={`${e.handle}:${index}`}
-            aria-pressed={look.selection?.handle === e.handle}
-            className="mb-1 block min-h-10 w-full rounded border border-neutral-600 px-2 py-2 text-left text-xs hover:bg-neutral-700 aria-pressed:border-emerald-400 aria-pressed:bg-emerald-950"
-            disabled={busy}
-            onClick={() => void bridge.call("studio_select", { handle: e.handle })}
-          >
-            <span className="block break-words">{e.label}</span>
-            <span className="block truncate text-[10px] text-neutral-400">{e.sourceFile}</span>
-          </button>
-        ))}
+        look.elements.flatMap((e, index) => {
+          // One source identity may occur in several hosts. Render each choice once.
+          if (look.elements.findIndex((row) => row.handle === e.handle) !== index) return [];
+          const scene = look.scenes.find((row) => row.sourceFile === e.sourceFile);
+          return (scene?.instances.length ? scene.instances : [null]).map((instance) => (
+            <button
+              key={`${e.handle}:${instance?.hostId ?? "root"}`}
+              aria-pressed={
+                look.selection?.handle === e.handle &&
+                (!instance || scene?.instance === instance.hostId)
+              }
+              className="mb-1 block min-h-10 w-full rounded border border-neutral-600 px-2 py-2 text-left text-xs hover:bg-neutral-700 aria-pressed:border-emerald-400 aria-pressed:bg-emerald-950"
+              disabled={busy}
+              onClick={() =>
+                void bridge.call("studio_select", {
+                  handle: e.handle,
+                  ...(instance ? { instance: instance.hostId } : {}),
+                })
+              }
+            >
+              <span className="block break-words">
+                {e.label}
+                {instance ? ` · ${instance.label}` : ""}
+              </span>
+              <span className="block truncate text-[10px] text-neutral-400">{e.sourceFile}</span>
+            </button>
+          ));
+        })}
     </nav>
   );
 }

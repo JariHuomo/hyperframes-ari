@@ -96,7 +96,7 @@ describe("registerPreviewRoutes", () => {
     expect(response.status).toBe(200);
     expect(html).toContain("__hfStudioMotionApply");
     expect(html).toContain("studio-motion");
-    expect(html).toContain("gsap@3.15.0/dist/gsap.min.js");
+    expect(html).toContain("/api/vendor/gsap/gsap.min.js");
   });
 
   it("injects the GSAP CustomEase plugin when Studio motion uses a custom ease", async () => {
@@ -118,8 +118,8 @@ describe("registerPreviewRoutes", () => {
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("gsap@3.15.0/dist/gsap.min.js");
-    expect(html).toContain("gsap@3.15.0/dist/CustomEase.min.js");
+    expect(html).toContain("/api/vendor/gsap/gsap.min.js");
+    expect(html).toContain("/api/vendor/gsap/CustomEase.min.js");
     expect(html.indexOf("gsap.min.js")).toBeLessThan(html.indexOf("CustomEase.min.js"));
     expect(html.indexOf("CustomEase.min.js")).toBeLessThan(html.indexOf("__hfStudioMotionApply"));
   });
@@ -146,7 +146,8 @@ describe("registerPreviewRoutes", () => {
 
     expect(response.status).toBe(200);
     // Plugin version is derived from the composition's own gsap (gsap@3 here).
-    expect(html).toContain("gsap@3/dist/MotionPathPlugin.min.js");
+    expect(html).toContain("/api/vendor/gsap/MotionPathPlugin.min.js");
+    expect(html).not.toContain("jsdelivr.net/npm/gsap@3/dist/MotionPathPlugin");
     // Plugin must load AFTER the core gsap script so it can register onto it.
     expect(html.indexOf("gsap.min.js")).toBeLessThan(html.indexOf("MotionPathPlugin.min.js"));
   });

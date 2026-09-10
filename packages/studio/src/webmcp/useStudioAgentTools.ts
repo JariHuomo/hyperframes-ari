@@ -1,3 +1,10 @@
+import { notebookTools } from "./tools/notebookTools";
+import { reviewTools } from "./tools/reviewTools";
+import { refreshProjectTool } from "./tools/refreshProjectTool";
+import { versionTools } from "./tools/versionTools";
+import { sceneStructureTools } from "./tools/sceneStructureTools";
+import { elementTools, type ElementToolDeps } from "./tools/elementTools";
+import { projectTools } from "./tools/projectTools";
 // Modified for Ari Studio; changes documented in /ARI.md.
 import { useAriAgentBridge } from "../ari/useAriAgentBridge";
 import type { AriAgentBridge } from "../ari/agentBridge";
@@ -97,6 +104,7 @@ function reportRegistration(report: ToolRegistrationReport, native: boolean): vo
 
 export interface StudioAgentToolsDeps
   extends
+    ElementToolDeps,
     SelectionToolDeps,
     FrameToolDeps,
     InspectToolDeps,
@@ -259,6 +267,13 @@ function buildStudioTools(depsRef: { readonly current: StudioAgentToolsDeps }): 
           studioDeleteAnimation(depsRef.current, input, signal),
         ),
     },
+    ...versionTools(() => depsRef.current),
+    ...elementTools(() => depsRef.current),
+    refreshProjectTool(() => depsRef.current),
+    ...sceneStructureTools(() => depsRef.current),
+    ...projectTools(() => depsRef.current.getSnapshot().projectId),
+    ...notebookTools(() => depsRef.current.getSnapshot().projectId),
+    ...reviewTools(() => depsRef.current.getSnapshot().projectId),
   ];
 }
 

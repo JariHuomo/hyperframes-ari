@@ -1,3 +1,4 @@
+import { mintElementHandle } from "../handles";
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
 import type { GsapAnimation } from "@hyperframes/parsers/gsap-parser";
@@ -40,6 +41,44 @@ function inspectDeps(overrides: Partial<InspectToolDeps> = {}): InspectToolDeps 
 }
 
 describe("studioInspect", () => {
+  it("reads the selected second host rather than its first identical source target", async () => {
+    const sourceFile = "scenes/card.html";
+    const doc = previewDoc(
+      `<div id="first" data-composition-src="${sourceFile}"><h1 data-hf-id="abc">First</h1></div><div id="second" data-composition-src="${sourceFile}"><h1 data-hf-id="abc">Second</h1></div>`,
+    );
+    const element = doc.querySelector<HTMLElement>("#second h1")!;
+    const current = selectionFor(element, { hfId: "abc", sourceFile, instanceId: "second" });
+    const buildSelection = vi.fn(async (node: HTMLElement) =>
+      selectionFor(node, { hfId: "abc", sourceFile }),
+    );
+    const result = await studioInspect(
+      inspectDeps({
+        getPreviewDocument: () => doc,
+        getCurrentSelection: () => current,
+        getCompositionPath: () => "index.html",
+        buildSelection,
+        getGsapDiagnostics: () => ({
+          animations: [animation()],
+          multipleTimelines: false,
+          unsupportedTimelinePattern: false,
+        }),
+      }),
+      {
+        handle: mintElementHandle({
+          projectId: "project-a",
+          activeCompositionPath: "index.html",
+          sourceFile,
+          hfId: "abc",
+        })!,
+      },
+    );
+    expect(buildSelection).toHaveBeenCalledWith(element);
+    expect(result).toMatchObject({
+      ok: true,
+      isCurrentSelection: true,
+      animations: [{ animationId: "anim-1" }],
+    });
+  });
   it("refuses a scoped handle from another project before inspecting", async () => {
     const doc = previewDoc('<h1 id="headline">Ship it</h1>');
 

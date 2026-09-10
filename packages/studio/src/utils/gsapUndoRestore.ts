@@ -16,8 +16,8 @@ type PreviewWindow = Window & {
 
 /** One file's restore from the edit-history store: before (live) / after (target) bytes. */
 export interface UndoRestoreFile {
-  previous: string;
-  restored: string;
+  previous: string | null;
+  restored: string | null;
 }
 
 /**
@@ -204,6 +204,10 @@ export function applyUndoRestoreToPreview(
     return "full";
   }
   const { previous, restored } = files[activeDocPath]!;
+  if (previous === null || restored === null) {
+    reloadPreview();
+    return "full";
+  }
   const diff = diffSoftReloadableRestore(previous, restored);
   if (!diff) {
     reloadPreview();

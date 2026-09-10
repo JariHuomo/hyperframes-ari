@@ -1,3 +1,8 @@
+import {
+  prepareTrackedEdit,
+  trackedOperationWriter,
+  UncertainSourceOperation,
+} from "./sourceOperations";
 import type { MutableRefObject } from "react";
 import { openComposition, type Composition } from "@hyperframes/sdk";
 import type { EditHistoryKind } from "./editHistory";
@@ -26,6 +31,7 @@ export type PublishSdkSession = (publication: SdkSessionPublication) => SdkSessi
 export interface CutoverDeps {
   editHistory: {
     recordEdit: (entry: {
+      operationId?: string;
       label: string;
       kind: EditHistoryKind;
       coalesceKey?: string;
@@ -172,23 +178,34 @@ async function writeAndRecord(
   deps: CutoverDeps,
   options?: CutoverOptions,
 ): Promise<Error | null> {
+  let entry;
+  try {
+    entry = await prepareTrackedEdit(deps.editHistory.recordEdit, {
+      label: options?.label ?? "Edit layer",
+      kind: "manual",
+      coalesceKey: options?.coalesceKey,
+      coalesceMs: options?.coalesceMs,
+      files: { [targetPath]: { before: originalContent, after } },
+    });
+  } catch (error) {
+    return asCutoverError(error);
+  }
   deps.domEditSaveTimestampRef.current = Date.now();
   markSelfWrite(targetPath, after);
   try {
-    await deps.writeProjectFile(targetPath, after, originalContent);
+    await trackedOperationWriter(deps.editHistory.recordEdit, entry, deps.writeProjectFile)(
+      targetPath,
+      after,
+      originalContent,
+    );
   } catch (error) {
     return asCutoverError(error);
   }
   try {
-    await deps.editHistory.recordEdit({
-      label: options?.label ?? "Edit layer",
-      kind: "manual",
-      ...(options?.coalesceKey ? { coalesceKey: options.coalesceKey } : {}),
-      ...(options?.coalesceMs != null ? { coalesceMs: options.coalesceMs } : {}),
-      files: { [targetPath]: { before: originalContent, after } },
-    });
+    await deps.editHistory.recordEdit(entry);
     return null;
   } catch (error) {
+    if (error instanceof UncertainSourceOperation) return error;
     return rollbackWrite(targetPath, originalContent, after, deps, asCutoverError(error));
   }
 }

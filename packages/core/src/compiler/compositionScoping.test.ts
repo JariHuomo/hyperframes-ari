@@ -1089,3 +1089,24 @@ describe("wrapInlineScriptWithErrorBoundary — <script> breakout", () => {
     expect(result).toBe("");
   });
 });
+
+it("keeps an authored alias that is another instance's actual timeline", () => {
+  const timelines: Record<string, unknown> = { scene: "original" };
+  const fakeWindow = {
+    document: { querySelector: () => null, querySelectorAll: () => [] },
+    __timelines: timelines,
+    gsap: {},
+    observed: "",
+  };
+  const wrapped = wrapScopedCompositionScript(
+    'window.__timelines.scene = "copy"; window.observed = window.__timelines.scene;',
+    "scene",
+    "error",
+    undefined,
+    "copy-host",
+  );
+  new Function("window", "gsap", wrapped)(fakeWindow, fakeWindow.gsap);
+  expect(timelines.scene).toBe("original");
+  expect(timelines["copy-host"]).toBe("copy");
+  expect(fakeWindow.observed).toBe("copy");
+});

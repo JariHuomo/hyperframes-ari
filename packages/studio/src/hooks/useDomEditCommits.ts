@@ -1,3 +1,4 @@
+import { persistTrackedDomEdit } from "../utils/trackedDomEdit";
 import { useCallback, useRef } from "react";
 import { findUnsafeDomPatchValues } from "@hyperframes/core/studio-api/finite-mutation";
 import { FONT_EXT } from "../utils/mediaTypes";
@@ -191,6 +192,24 @@ export function useDomEditCommits({
         throw new DomEditPersistUnsafeValueError(`DOM patch contains unsafe values: ${fields}`, {
           alreadyToasted: true,
         });
+      }
+
+      if (!options?.prepareContent) {
+        const tracked = await persistTrackedDomEdit({
+          projectId: pid,
+          sourceFile: targetPath,
+          hfId: selection.hfId,
+          before: originalContent,
+          operations,
+          label: options?.label ?? "Muokkaa sisältöä",
+          recordEdit: editHistory.recordEdit,
+          writeFile: writeProjectFile,
+        });
+        if (tracked) {
+          forceReloadSdkSession?.();
+          if (!options?.skipRefresh && tracked.changed) reloadPreview();
+          return completePersistence(tracked, tracked.changed);
+        }
       }
 
       // Skip the SDK path when prepareContent is set (e.g. @font-face injection

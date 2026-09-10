@@ -53,11 +53,12 @@ const { values } = parseArgs({
     port: { type: "string", default: "3077" },
     help: { type: "boolean" },
     background: { type: "boolean" },
+    offline: { type: "boolean" },
   },
 });
 if (values.help) {
   process.stdout.write(
-    "Ari Studio\n  node scripts/ari-studio.mjs [--project /absolute/project] [--port 3077] [--background]\nWithout --project, opens a private copy of the edit-loop sandbox.\nWith --project, edits are saved directly to that directory.\n",
+    "Ari Studio\n  node scripts/ari-studio.mjs [--project /absolute/project] [--port 3077] [--background] [--offline]\nWithout --project, opens a private copy of the edit-loop sandbox.\nWith --project, edits are saved directly to that directory.\n",
   );
   process.exit(0);
 }
@@ -102,23 +103,42 @@ const runtimeDir = join(root, ".ari-studio");
 if (values.background) mkdirSync(runtimeDir, { recursive: true });
 const logPath = join(runtimeDir, `${port}.log`);
 const logFd = values.background ? openSync(logPath, "a") : undefined;
-const child = spawn(
-  bun,
-  ["run", "--cwd", "packages/studio", "dev", "--", "--port", String(port), "--strictPort"],
-  {
-    cwd: root,
-    stdio: logFd === undefined ? "inherit" : ["ignore", logFd, logFd],
-    detached: Boolean(values.background),
-    env: {
-      ...process.env,
-      PATH: `${dirname(bun)}:${resolve(dirname(bun), "../../.bin")}:${process.env.PATH ?? ""}`,
-      HYPERFRAMES_NO_TELEMETRY: "1",
-      VITE_HYPERFRAMES_NO_TELEMETRY: "1",
-      HYPERFRAMES_AUTO_PROXY: "false",
-      PRODUCER_LOW_MEMORY_MODE: "1",
-    },
+/**
+ * Ari: `ARI_STUDIO_HOST=node` runs Vite under Node instead of Bun.
+ *
+ * Bun's Vite module runner intermittently dies here with "transport was
+ * disconnected, cannot call fetchModule", which the launcher can only report as
+ * a startup timeout. The Node host is the same dev server with the same
+ * environment, and it is what the acceptance journeys use when Bun is stuck.
+ */
+const nodeHost = process.env.ARI_STUDIO_HOST === "node";
+const command = nodeHost ? process.execPath : bun;
+const args = nodeHost
+  ? [
+      "--import",
+      "tsx",
+      "node_modules/vite/bin/vite.js",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      String(port),
+      "--strictPort",
+    ]
+  : ["run", "--cwd", "packages/studio", "dev", "--", "--port", String(port), "--strictPort"];
+const child = spawn(command, args, {
+  cwd: nodeHost ? join(root, "packages/studio") : root,
+  stdio: logFd === undefined ? "inherit" : ["ignore", logFd, logFd],
+  detached: Boolean(values.background),
+  env: {
+    ...process.env,
+    ...(values.offline ? { ARI_OFFLINE: "1" } : {}),
+    PATH: `${dirname(bun)}:${resolve(dirname(bun), "../../.bin")}:${process.env.PATH ?? ""}`,
+    HYPERFRAMES_NO_TELEMETRY: "1",
+    VITE_HYPERFRAMES_NO_TELEMETRY: "1",
+    HYPERFRAMES_AUTO_PROXY: "false",
+    PRODUCER_LOW_MEMORY_MODE: "1",
   },
-);
+});
 if (logFd !== undefined) closeSync(logFd);
 child.on("error", (error) => {
   process.stderr.write(

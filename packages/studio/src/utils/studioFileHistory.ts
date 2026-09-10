@@ -1,14 +1,17 @@
+import { prepareTrackedEdit, trackedOperationWriter } from "./sourceOperations";
+import { writeConditionalFiles } from "./conditionalFileTransaction";
 import type { MutableRefObject } from "react";
 import type { EditHistoryKind } from "./editHistory";
 import { serializeStudioFileMutations } from "./studioFileMutationCoordinator";
 import { createStudioSaveHttpError } from "./studioSaveDiagnostics";
 
-export interface RecordEditInput {
+export interface RecordEditInput<T extends string | null = string> {
+  operationId?: string;
   label: string;
   kind: EditHistoryKind;
   coalesceKey?: string;
   coalesceMs?: number;
-  files: Record<string, { before: string; after: string }>;
+  files: Record<string, { before: T; after: T }>;
 }
 
 export interface DomEditCommitBaseParams {
@@ -24,16 +27,18 @@ export interface DomEditCommitBaseParams {
 
 type ProjectFileWriter = (path: string, content: string, expectedContent?: string) => Promise<void>;
 
-interface SaveProjectFilesWithHistoryInput {
+interface SaveProjectFilesWithHistoryInput<T extends string | null> {
+  operationId?: string;
+  operationOwner?: object;
   projectId: string;
   label: string;
   kind: EditHistoryKind;
   coalesceKey?: string;
   coalesceMs?: number;
-  files: Record<string, string>;
-  readFile: (path: string) => Promise<string>;
-  writeFile: ProjectFileWriter;
-  recordEdit: (entry: RecordEditInput) => Promise<void>;
+  files: Record<string, T>;
+  readFile: (path: string) => Promise<T>;
+  writeFile: (path: string, content: T, expectedContent?: T) => Promise<void>;
+  recordEdit: (entry: RecordEditInput<T>) => Promise<void>;
   /**
    * What a path holds ON DISK right now, when that is not the same as the
    * history's "before".
@@ -48,7 +53,7 @@ interface SaveProjectFilesWithHistoryInput {
    *
    * Undo still restores `before`; this only says what to expect on disk.
    */
-  diskContent?: Record<string, string>;
+  diskContent?: Record<string, T>;
 }
 
 export async function readProjectFileContent(pid: string, path: string): Promise<string> {
@@ -63,7 +68,7 @@ export async function readProjectFileContent(pid: string, path: string): Promise
   return data.content;
 }
 
-export async function saveProjectFilesWithHistory({
+export async function saveProjectFilesWithHistory<T extends string | null>({
   label,
   kind,
   coalesceKey,
@@ -73,9 +78,11 @@ export async function saveProjectFilesWithHistory({
   writeFile,
   recordEdit,
   diskContent,
-}: SaveProjectFilesWithHistoryInput): Promise<string[]> {
+  operationOwner,
+  operationId,
+}: SaveProjectFilesWithHistoryInput<T>): Promise<string[] & { operationId?: string }> {
   return serializeStudioFileMutations(writeFile, Object.keys(files), async () => {
-    const snapshots: Record<string, { before: string; after: string }> = {};
+    const snapshots: Record<string, { before: T; after: T }> = {};
     for (const [path, after] of Object.entries(files)) {
       const before = await readFile(path);
       if (before !== after) {
@@ -86,27 +93,18 @@ export async function saveProjectFilesWithHistory({
     const changedPaths = Object.keys(snapshots);
     if (changedPaths.length === 0) return [];
 
-    const writtenPaths: string[] = [];
-    try {
-      for (const path of changedPaths) {
-        await writeFile(path, snapshots[path].after, diskContent?.[path] ?? snapshots[path].before);
-        writtenPaths.push(path);
-      }
-
-      await recordEdit({ label, kind, coalesceKey, coalesceMs, files: snapshots });
-    } catch (error) {
-      try {
-        for (const path of writtenPaths.reverse()) {
-          await writeFile(path, snapshots[path].before, snapshots[path].after);
-        }
-      } catch (rollbackError) {
-        throw new AggregateError(
-          [error, rollbackError],
-          "Failed to save project files and rollback did not complete",
-        );
-      }
-      throw error;
-    }
-    return changedPaths;
+    const entry = await prepareTrackedEdit(
+      operationOwner ?? recordEdit,
+      { operationId, label, kind, coalesceKey, coalesceMs, files: snapshots },
+      diskContent,
+    );
+    await writeConditionalFiles(
+      Object.fromEntries(changedPaths.map((path) => [path, snapshots[path].after])),
+      Object.fromEntries(changedPaths.map((path) => [path, snapshots[path].before])),
+      trackedOperationWriter(operationOwner ?? recordEdit, entry, writeFile),
+      () => recordEdit(entry),
+      diskContent,
+    );
+    return Object.assign(changedPaths, { operationId: entry.operationId });
   });
 }

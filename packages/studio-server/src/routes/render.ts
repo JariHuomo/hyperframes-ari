@@ -137,7 +137,7 @@ export function registerRenderRoutes(api: Hono, adapter: StudioApiAdapter): void
 
     ensureCleanupTimer();
 
-    return c.json({ jobId, status: "rendering" });
+    return c.json({ jobId, status: "rendering", sourceRevision: jobState.sourceRevision });
   });
 
   // SSE progress stream
@@ -289,6 +289,7 @@ export function registerRenderRoutes(api: Hono, adapter: StudioApiAdapter): void
         const metaPath = join(rendersDir, `${rid}.meta.json`);
         let status: "complete" | "failed" = "complete";
         let durationMs: number | undefined;
+        let sourceRevision: string | undefined;
         if (existsSync(metaPath)) {
           try {
             const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
@@ -298,6 +299,7 @@ export function registerRenderRoutes(api: Hono, adapter: StudioApiAdapter): void
             // an earlier attempt left behind failed metadata.
             if (meta.status === "failed" && !existsSync(fp)) status = "failed";
             if (meta.durationMs) durationMs = meta.durationMs;
+            if (typeof meta.sourceRevision === "string") sourceRevision = meta.sourceRevision;
           } catch {
             /* ignore */
           }
@@ -309,6 +311,7 @@ export function registerRenderRoutes(api: Hono, adapter: StudioApiAdapter): void
           createdAt: stat.mtimeMs,
           status,
           durationMs,
+          sourceRevision,
         };
       })
       .sort((a, b) => b.createdAt - a.createdAt);

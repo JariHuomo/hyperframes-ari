@@ -120,3 +120,11 @@ describe("createProjectSignatureCache", () => {
     expect(cache.get(PROJECT)).toBe("sig-2");
   });
 });
+
+it("invalidates the complete project synchronously before an authoring transaction", () => {
+  const source = countingCompute();
+  const cache = createProjectSignatureCache({ compute: source.compute });
+  expect(cache.get(PROJECT)).toBe("sig-1");
+  cache.invalidate(PROJECT);
+  expect(cache.get(PROJECT)).toBe("sig-2");
+});

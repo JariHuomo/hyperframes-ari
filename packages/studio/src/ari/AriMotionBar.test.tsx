@@ -81,8 +81,8 @@ describe("AriMotionBar", () => {
     // Scene hosted at 4 s; a 1 s motion at local 1 s is master 5 s (acceptance).
     const { host, root, call } = render(tween(1, 1), hosted(4, 4));
 
-    expect(host.textContent).toContain("kohtaus 1.00–2.00 s");
-    expect(host.textContent).toContain("pääaika 5.00–6.00 s");
+    expect(host.textContent).toContain("Kohtauksessa 1,00–2,00 s");
+    expect(host.textContent).toContain("Koko videossa 5,00–6,00 s");
 
     // Drag 5 -> 5,5 s must write 1,5 s into the scene file, not 5,5.
     dragBy(host, 0.5);
@@ -107,7 +107,7 @@ describe("AriMotionBar", () => {
     expect(host.querySelector('[aria-label="Liike 1 toistonopeus ×1,5"]')?.textContent).toBe(
       "×1,5",
     );
-    expect(host.textContent).toContain("pääaika 5.60–6.20 s");
+    expect(host.textContent).toContain("Koko videossa 5,60–6,20 s");
 
     dragBy(host, 0.3);
 
@@ -145,7 +145,7 @@ describe("AriMotionBar", () => {
   it("leaves a root-composition motion in master time untouched", () => {
     const { host, root, call } = render(tween(2, 1), null);
 
-    expect(host.textContent).toContain("Liike 1 · 2.00–3.00 s");
+    expect(host.textContent).toContain("Liike 1 · 2,00–3,00 s");
     dragBy(host, 0.5);
 
     const [, input] = call.mock.calls[0] as unknown as [

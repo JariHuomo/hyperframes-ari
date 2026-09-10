@@ -164,8 +164,8 @@ export async function studioAddAnimation(
       if (!landed) {
         return toolFailure(
           "failed",
-          "the animation did not land",
-          "The target may be stale. Call studio_look and try again with its current handle.",
+          "Liikkeen tallennuksen valmistumista ei voitu varmistaa.",
+          "Read studio_resume_work and studio_look before retrying. A missing receipt does not prove that no source write occurred.",
         );
       }
       const value = {
@@ -267,7 +267,7 @@ export async function studioUpdateAnimation(
       if (!landed) {
         return toolFailure(
           "failed",
-          `the update to ${animationId} did not land`,
+          `Liikkeen ${animationId} muutoksen valmistumista ei voitu varmistaa.`,
           "The animation id may be stale. studio_inspect lists the current ones.",
         );
       }
@@ -384,7 +384,7 @@ export async function studioDeleteAnimation(
       if (!landed) {
         return toolFailure(
           "failed",
-          `the delete of ${animationId} did not land`,
+          `Liikkeen ${animationId} poiston valmistumista ei voitu varmistaa.`,
           "The animation id may be stale. studio_inspect lists the current ones.",
         );
       }

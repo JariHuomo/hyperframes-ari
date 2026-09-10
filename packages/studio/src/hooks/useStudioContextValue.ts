@@ -1,3 +1,5 @@
+import { nullableProjectFiles } from "../utils/nullableProjectFiles";
+import type { ElementFiles } from "../ari/elementOperations";
 import { useCallback, useMemo, useRef, useState, type DragEvent } from "react";
 import type { DomEditSelection } from "../components/editor/domEditing";
 import type { StudioContextValue } from "../contexts/StudioContext";
@@ -6,6 +8,7 @@ import type { TimelineFileDropHandler } from "./useTimelineEditingTypes";
 import { usePlayerStore } from "../player";
 
 interface StudioContextInput {
+  elementFiles?: StudioContextValue["elementFiles"];
   projectId: string;
   activeCompPath: string | null;
   setActiveCompPath: (path: string | null) => void;
@@ -17,7 +20,13 @@ interface StudioContextInput {
   setRefreshKey: React.Dispatch<React.SetStateAction<number>>;
   timelineElements: StudioContextValue["timelineElements"];
   isPlaying: boolean;
-  editHistory: { canUndo: boolean; canRedo: boolean; undoLabel: string; redoLabel: string };
+  editHistory: {
+    refresh?: (readSources: () => Promise<void>) => Promise<void>;
+    canUndo: boolean;
+    canRedo: boolean;
+    undoLabel: string;
+    redoLabel: string;
+  };
   handleUndo: StudioContextValue["handleUndo"];
   handleRedo: StudioContextValue["handleRedo"];
   // Was a second copy of the same shape, which meant every field added to the
@@ -35,8 +44,9 @@ interface StudioContextInput {
 }
 
 // fallow-ignore-next-line complexity
-export function buildStudioContextValue(input: StudioContextInput): StudioContextValue {
+function buildStudioContextValue(input: StudioContextInput): StudioContextValue {
   return {
+    elementFiles: input.elementFiles,
     projectId: input.projectId,
     activeCompPath: input.activeCompPath,
     setActiveCompPath: input.setActiveCompPath,
@@ -157,4 +167,20 @@ export function useGlobalFileDrop(handleTimelineFileDrop: TimelineFileDropHandle
     [handleTimelineFileDrop],
   );
   return useDragOverlay(onDrop);
+}
+
+function useElementFiles(projectId: string, recordEdit: ElementFiles["recordEdit"]) {
+  return useMemo(
+    () => ({ ...nullableProjectFiles(projectId), recordEdit }),
+    [projectId, recordEdit],
+  );
+}
+
+export function useStudioContextValue(
+  input: StudioContextInput & {
+    editHistory: StudioContextInput["editHistory"] & { recordEdit: ElementFiles["recordEdit"] };
+  },
+): StudioContextValue {
+  const elementFiles = useElementFiles(input.projectId, input.editHistory.recordEdit);
+  return buildStudioContextValue({ ...input, elementFiles });
 }

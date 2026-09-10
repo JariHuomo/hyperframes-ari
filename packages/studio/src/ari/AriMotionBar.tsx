@@ -211,8 +211,8 @@ function motionBarLabels(
   const rate =
     instance && instance.playbackRate !== 1 ? formatPlaybackRate(instance.playbackRate) : null;
   const label = instance
-    ? `Liike ${index + 1} · kohtaus ${position.toFixed(2)}–${(position + length).toFixed(2)} s · pääaika ${p.toFixed(2)}–${(p + d).toFixed(2)} s`
-    : `Liike ${index + 1} · ${p.toFixed(2)}–${(p + d).toFixed(2)} s`;
+    ? `Liike ${index + 1} · Kohtauksessa ${position.toFixed(2).replace(".", ",")}–${(position + length).toFixed(2).replace(".", ",")} s · Koko videossa ${p.toFixed(2).replace(".", ",")}–${(p + d).toFixed(2).replace(".", ",")} s`
+    : `Liike ${index + 1} · ${p.toFixed(2).replace(".", ",")}–${(p + d).toFixed(2).replace(".", ",")} s`;
   const title = reason ? `Ei mahdu näkyviin: ${reason}` : `Käyrä: ${ease}`;
 
   return { ease, rate, label, title };

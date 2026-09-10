@@ -1,3 +1,7 @@
+import { bindOperationHistory } from "../utils/sourceOperations";
+import { withStudioFileRefresh } from "../utils/studioFileMutationCoordinator";
+import { createProjectEditHistoryStorage } from "../utils/projectVersions";
+import { writeConditionalFiles } from "../utils/conditionalFileTransaction";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildEditHistoryEntry,
@@ -13,13 +17,13 @@ import {
   type EditHistoryTransitionResult,
 } from "../utils/editHistory";
 import {
-  createIndexedDbEditHistoryStorage,
   loadEditHistoryState,
   saveEditHistoryState,
   type EditHistoryStorageAdapter,
 } from "../utils/editHistoryStorage";
 
 interface RecordEditInput {
+  operationId?: string;
   label: string;
   kind: EditHistoryKind;
   coalesceKey?: string;
@@ -28,8 +32,13 @@ interface RecordEditInput {
 }
 
 interface ApplyCallbacks {
-  readFile: (path: string) => Promise<string>;
-  writeFile: (path: string, content: string) => Promise<void>;
+  readFile: (path: string, encoding?: "base64") => Promise<string | null>;
+  writeFile: (
+    path: string,
+    content: string | null,
+    expectedContent?: string | null,
+    encoding?: "base64",
+  ) => Promise<void>;
   serialize?: <T>(paths: readonly string[], task: () => Promise<T>) => Promise<T>;
 }
 
@@ -47,8 +56,8 @@ interface UsePersistentEditHistoryOptions {
  * needs a full iframe reload.
  */
 interface ApplyRestoredFile {
-  previous: string;
-  restored: string;
+  previous: string | null;
+  restored: string | null;
 }
 
 interface ApplyResult {
@@ -74,14 +83,25 @@ type EditHistoryMutation<T> = (state: EditHistoryState) => Promise<{
 
 /** Pair the just-written (`restored`) bytes with the pre-write (`previous`) bytes per path. */
 function restoredFilesMap(
-  filesToWrite: Record<string, string>,
-  currentFiles: Record<string, string>,
+  filesToWrite: Record<string, string | null>,
+  currentFiles: Record<string, string | null>,
+  entry: EditHistoryEntry,
 ): Record<string, ApplyRestoredFile> {
   const out: Record<string, ApplyRestoredFile> = {};
   for (const [path, restored] of Object.entries(filesToWrite)) {
-    out[path] = { previous: currentFiles[path] ?? "", restored };
+    out[path] = {
+      previous: previewContent(path, currentFiles[path], entry.files[path].encoding),
+      restored: previewContent(path, restored, entry.files[path].encoding),
+    };
   }
   return out;
+}
+
+/** Binary assets force a full preview refresh; source diffs receive decoded UTF-8. */
+function previewContent(path: string, value: string | null, encoding?: "base64") {
+  if (encoding !== "base64" || value === null) return value;
+  if (!/\.(html|css|js|json|svg|txt|md)$/.test(path)) return null;
+  return new TextDecoder().decode(Uint8Array.from(atob(value), (char) => char.charCodeAt(0)));
 }
 
 function createEntryId(now: number): string {
@@ -104,12 +124,12 @@ function snapshotEditHistoryState(state: EditHistoryState) {
 
 async function readCurrentFileHashes(
   paths: string[],
-  readFile: (path: string) => Promise<string>,
+  readFile: (path: string) => Promise<string | null>,
 ): Promise<{
-  currentFiles: Record<string, string>;
+  currentFiles: Record<string, string | null>;
   currentHashes: Record<string, string>;
 }> {
-  const currentFiles: Record<string, string> = {};
+  const currentFiles: Record<string, string | null> = {};
   const currentHashes: Record<string, string> = {};
   for (const path of paths) {
     const content = await readFile(path);
@@ -117,36 +137,6 @@ async function readCurrentFileHashes(
     currentHashes[path] = hashEditHistoryContent(content);
   }
   return { currentFiles, currentHashes };
-}
-
-async function writeFilesWithRollback({
-  files,
-  rollbackFiles,
-  writeFile,
-}: {
-  files: Record<string, string>;
-  rollbackFiles: Record<string, string>;
-  writeFile: (path: string, content: string) => Promise<void>;
-}): Promise<void> {
-  const writtenPaths: string[] = [];
-  try {
-    for (const [path, content] of Object.entries(files)) {
-      await writeFile(path, content);
-      writtenPaths.push(path);
-    }
-  } catch (error) {
-    try {
-      for (const path of writtenPaths.reverse()) {
-        await writeFile(path, rollbackFiles[path]);
-      }
-    } catch (rollbackError) {
-      throw new AggregateError(
-        [error, rollbackError],
-        "Failed to apply edit history and rollback did not complete",
-      );
-    }
-    throw error;
-  }
 }
 
 /**
@@ -164,13 +154,20 @@ async function applyHistoryStep(
   ) => EditHistoryTransitionResult,
   now: () => number,
   callbacks: ApplyCallbacks,
+  persist: (state: EditHistoryState) => Promise<void>,
 ): Promise<{ state: EditHistoryState; result: ApplyResult }> {
   if (!entry) {
     return { state: currentState, result: { ok: false, reason: "empty" } };
   }
   const paths = Object.keys(entry.files);
   const apply = async (): Promise<{ state: EditHistoryState; result: ApplyResult }> => {
-    const { currentFiles, currentHashes } = await readCurrentFileHashes(paths, callbacks.readFile);
+    const { currentFiles, currentHashes } = await readCurrentFileHashes(paths, (path) =>
+      callbacks.readFile(path, entry.files[path].encoding),
+    );
+    const side = transition === undoEditHistory ? "after" : "before";
+    if (paths.some((path) => currentFiles[path] !== entry.files[path][side])) {
+      return { state: currentState, result: { ok: false, reason: "content-mismatch" } };
+    }
     const result = transition(currentState, currentHashes, now());
     if (!result.ok) {
       return {
@@ -178,18 +175,20 @@ async function applyHistoryStep(
         result: { ok: false, reason: result.reason },
       };
     }
-    await writeFilesWithRollback({
-      files: result.filesToWrite,
-      rollbackFiles: currentFiles,
-      writeFile: callbacks.writeFile,
-    });
+    await writeConditionalFiles(
+      result.filesToWrite,
+      currentFiles,
+      (path, content, expected) =>
+        callbacks.writeFile(path, content, expected, entry.files[path].encoding),
+      () => persist(result.state),
+    );
     return {
       state: result.state,
       result: {
         ok: true,
         label: result.entry.label,
         paths: Object.keys(result.entry.files),
-        files: restoredFilesMap(result.filesToWrite, currentFiles),
+        files: restoredFilesMap(result.filesToWrite, currentFiles, entry),
       },
     };
   };
@@ -206,20 +205,16 @@ export function createPersistentEditHistoryStore({
   let state = initialState;
   let queue = Promise.resolve();
 
-  const save = async (nextState: EditHistoryState) => {
-    state = nextState;
-    onChange(nextState);
-    try {
-      await saveEditHistoryState(storage, projectId, nextState);
-    } catch {
-      // Keep in-memory history usable when IndexedDB is unavailable.
-    }
-  };
+  const persist = (nextState: EditHistoryState) =>
+    saveEditHistoryState(storage, projectId, nextState);
 
   const mutate = async <T>(mutation: EditHistoryMutation<T>): Promise<T> => {
     const run = queue.then(async () => {
       const { state: nextState, result } = await mutation(state);
-      if (nextState !== state) await save(nextState);
+      if (nextState !== state) {
+        state = nextState;
+        onChange(nextState);
+      }
       return result;
     });
     queue = run.then(
@@ -231,6 +226,18 @@ export function createPersistentEditHistoryStore({
 
   return {
     snapshot: () => snapshotEditHistoryState(state),
+    /** Replace the complete stack, never only its persistence token. */
+    async refresh(readSources: () => Promise<void> = async () => {}) {
+      return withStudioFileRefresh(() =>
+        mutate<void>(async () => {
+          const next = storage.refresh
+            ? ((await storage.refresh(projectId, readSources)) ?? createEmptyEditHistory())
+            : await loadEditHistoryState(storage, projectId);
+          if (!storage.refresh) await readSources();
+          return { state: next, result: undefined };
+        }),
+      );
+    },
     async recordEdit(input: RecordEditInput) {
       await mutate<void>(async (currentState) => {
         const timestamp = now();
@@ -240,8 +247,10 @@ export function createPersistentEditHistoryStore({
           projectId,
           now: timestamp,
         });
+        const nextState = pushEditHistoryEntry(currentState, entry);
+        await persist(nextState);
         return {
-          state: pushEditHistoryEntry(currentState, entry),
+          state: nextState,
           result: undefined,
         };
       });
@@ -254,6 +263,7 @@ export function createPersistentEditHistoryStore({
           undoEditHistory,
           now,
           callbacks,
+          persist,
         ),
       );
     },
@@ -265,6 +275,7 @@ export function createPersistentEditHistoryStore({
           redoEditHistory,
           now,
           callbacks,
+          persist,
         ),
       );
     },
@@ -299,7 +310,7 @@ export async function createPersistentEditHistoryController({
 
 export function usePersistentEditHistory(options: UsePersistentEditHistoryOptions) {
   const storage = useMemo(
-    () => options.storage ?? createIndexedDbEditHistoryStorage(),
+    () => options.storage ?? createProjectEditHistoryStorage(),
     [options.storage],
   );
   const now = options.now ?? Date.now;
@@ -359,12 +370,12 @@ export function usePersistentEditHistory(options: UsePersistentEditHistoryOption
 
   const recordEdit = useCallback(
     async (input: RecordEditInput) => {
-      if (!projectId) return;
+      if (!projectId) throw new Error("Projektia ei ole avattu.");
       if (activeProjectIdRef.current !== projectId) {
         throw new Error(`Cannot record an edit for inactive project ${projectId}`);
       }
       const store = storeRef.current;
-      if (!store) return;
+      if (!store) throw new Error("Muutoshistoria latautuu. Yritä hetken kuluttua uudelleen.");
       if (storeProjectIdRef.current !== projectId) {
         throw new Error(`Edit history store does not belong to project ${projectId}`);
       }
@@ -372,6 +383,8 @@ export function usePersistentEditHistory(options: UsePersistentEditHistoryOption
     },
     [projectId],
   );
+
+  if (projectId && !options.storage) bindOperationHistory(recordEdit, projectId);
 
   const undo = useCallback(
     async (callbacks: ApplyCallbacks): Promise<ApplyResult> => {
@@ -401,7 +414,26 @@ export function usePersistentEditHistory(options: UsePersistentEditHistoryOption
     [projectId],
   );
 
+  const refresh = useCallback(
+    async (readSources: () => Promise<void>) => {
+      if (
+        !projectId ||
+        activeProjectIdRef.current !== projectId ||
+        storeProjectIdRef.current !== projectId ||
+        !storeRef.current
+      )
+        throw new Error("Mainoksen historia ei ole valmis päivitettäväksi.");
+      await storeRef.current.refresh(async () => {
+        await readSources();
+        if (activeProjectIdRef.current !== projectId)
+          throw new Error("Avoin mainos vaihtui päivityksen aikana.");
+      });
+    },
+    [projectId],
+  );
+
   return {
+    refresh,
     loaded,
     ...snapshotEditHistoryState(state),
     recordEdit,

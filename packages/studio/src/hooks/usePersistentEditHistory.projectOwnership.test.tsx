@@ -14,6 +14,30 @@ async function flushAsyncEffects(): Promise<void> {
 }
 
 describe("usePersistentEditHistory project ownership", () => {
+  it("refuses to acknowledge edits before the history has loaded", async () => {
+    const storage = createMemoryEditHistoryStorage();
+    storage.get = () => new Promise(() => {});
+    let record: ReturnType<typeof usePersistentEditHistory>["recordEdit"] | undefined;
+    function LoadingHistory() {
+      record = usePersistentEditHistory({ projectId: "loading", storage }).recordEdit;
+      return null;
+    }
+    const root = createRoot(document.createElement("div"));
+    await act(async () => root.render(<LoadingHistory />));
+    try {
+      if (!record) throw new Error("probe missing");
+      await expect(
+        record({
+          label: "edit",
+          kind: "manual",
+          files: { "index.html": { before: "a", after: "b" } },
+        }),
+      ).rejects.toThrow("latautuu");
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+
   it("rejects a delayed project A recorder after project B becomes active", async () => {
     const storage = createMemoryEditHistoryStorage();
     const now = () => 100;

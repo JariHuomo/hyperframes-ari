@@ -11,6 +11,7 @@ import { useTimelineSelectionPreviewSync } from "./useTimelineSelectionPreviewSy
 installReactActEnvironment();
 
 interface HarnessProps {
+  previewPending?: boolean;
   selectedElementId: string | null;
   selectedElementIds: Set<string>;
   timelineElements: TimelineElement[];
@@ -229,7 +230,94 @@ describe("useTimelineSelectionPreviewSync", () => {
       onSelectionNotFound,
     });
 
-    expect(applyDomSelection).toHaveBeenCalledWith(secondSelection);
+    expect(applyDomSelection).toHaveBeenCalledWith(secondSelection, { preserveRevision: true });
     harness.cleanup();
   });
+});
+
+it("preserves revision for same-identity rebuilds but not a new timeline choice", async () => {
+  const { firstSelection, secondSelection, timelineElements, selectionById } = makeSyncFixture();
+  const applyDomSelection = vi.fn();
+  const harness = renderHarness();
+  const props = {
+    selectedElementId: "clip-1",
+    selectedElementIds: new Set(["clip-1"]),
+    timelineElements,
+    domEditSelection: null,
+    domEditGroupSelections: [],
+    buildDomSelectionForTimelineElement: async (element: TimelineElement) =>
+      selectionById.get(element.id) ?? null,
+    applyDomSelection,
+    applyMarqueeSelection: vi.fn(),
+    onSelectionNotFound: vi.fn(),
+  };
+  await harness.rerender(props);
+  expect(applyDomSelection).toHaveBeenLastCalledWith(firstSelection, {});
+  await harness.rerender({ ...props, timelineElements: [] });
+  expect(applyDomSelection).toHaveBeenLastCalledWith(null, {
+    revealPanel: false,
+    preserveRevision: true,
+  });
+  await harness.rerender({
+    ...props,
+    selectedElementId: "clip-2",
+    selectedElementIds: new Set(["clip-2"]),
+  });
+  expect(applyDomSelection).toHaveBeenLastCalledWith(secondSelection, {});
+  harness.cleanup();
+});
+
+it("does not clear a selected placement while preview discovery is pending", async () => {
+  const harness = renderHarness();
+  const applyDomSelection = vi.fn();
+  const props = {
+    previewPending: true,
+    selectedElementId: "second",
+    selectedElementIds: new Set(["second"]),
+    timelineElements: [],
+    domEditSelection: makeSelection("second", document.createElement("div")),
+    domEditGroupSelections: [],
+    buildDomSelectionForTimelineElement: vi.fn(async () => null),
+    applyDomSelection,
+    applyMarqueeSelection: vi.fn(),
+    onSelectionNotFound: vi.fn(),
+  };
+  await harness.rerender(props);
+  expect(applyDomSelection).not.toHaveBeenCalled();
+  await harness.rerender({ ...props, previewPending: false });
+  // A list that names none of the selected ids is what a rebuild looks like for a
+  // beat, so the clear waits for it to come back before believing the clip is
+  // gone. It must not have cleared yet, and it must still clear in the end.
+  expect(applyDomSelection).not.toHaveBeenCalled();
+  await new Promise((resolve) => setTimeout(resolve, 1800));
+  expect(applyDomSelection).toHaveBeenCalledWith(null, { revealPanel: false });
+  harness.cleanup();
+});
+
+it("keeps the selection when the rebuilt timeline names the clip again", async () => {
+  const harness = renderHarness();
+  const applyDomSelection = vi.fn();
+  const element = document.createElement("div");
+  const selection = makeSelection("second", element);
+  const props = {
+    previewPending: false,
+    selectedElementId: "second",
+    selectedElementIds: new Set(["second"]),
+    timelineElements: [] as never[],
+    domEditSelection: selection,
+    domEditGroupSelections: [],
+    buildDomSelectionForTimelineElement: vi.fn(async () => selection),
+    applyDomSelection,
+    applyMarqueeSelection: vi.fn(),
+    onSelectionNotFound: vi.fn(),
+  };
+  await harness.rerender(props);
+  expect(applyDomSelection).not.toHaveBeenCalled();
+  await harness.rerender({
+    ...props,
+    timelineElements: [{ id: "second", key: "second" }] as never,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  expect(applyDomSelection).not.toHaveBeenCalledWith(null, expect.anything());
+  harness.cleanup();
 });

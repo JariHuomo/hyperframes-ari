@@ -19,14 +19,13 @@
  *   merely LOOKING at a named ease cannot rewrite it as a rounded `custom(...)`.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { EaseCurveSection } from "../components/editor/EaseCurveSection";
 import { MiniCurveSvg } from "../components/editor/easeCurveSvg";
 import { parseEase } from "../webmcp/easeContract";
 import type { AriAgentBridge } from "./agentBridge";
 import { ARI_EASE_GROUPS, ariEaseLabel } from "./easeCatalog";
 import { AriNumber, ariNumber } from "./AriNumber";
-import { replayMotion } from "./replayMotion";
 import { ariButton } from "./styles";
 
 type BridgeCall = Pick<AriAgentBridge, "call">;
@@ -53,7 +52,7 @@ export function AriEasePicker({
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const name = ariEaseLabel(value) ?? `Mukautettu (${value})`;
+  const name = ariEaseLabel(value) ?? "Mukautettu käyrä";
   return (
     <div className="relative">
       <span className="block text-xs text-neutral-300">{label}</span>
@@ -176,8 +175,6 @@ export function AriEase({
   ease,
   busy,
   index = 0,
-  position,
-  duration,
 }: {
   bridge: BridgeCall;
   handle: string;
@@ -197,8 +194,6 @@ export function AriEase({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [frames, setFrames] = useState<{ url: string; progress: number }[] | null>(null);
-  const stopReplay = useRef<(() => void) | null>(null);
-  useEffect(() => () => stopReplay.current?.(), []);
   // The source told us what it holds; drop the optimistic paint.
   useEffect(() => setOptimistic(null), [ease]);
 
@@ -257,7 +252,6 @@ export function AriEase({
     );
   }
 
-  const replayable = typeof position === "number" && typeof duration === "number" && duration > 0;
   return (
     <div
       className="space-y-2 rounded border border-neutral-700 p-2"
@@ -285,21 +279,14 @@ export function AriEase({
       {/* Fixed-height status row: the buttons below it must not move while a
           handle is being dragged. */}
       <p className="min-h-5 text-xs" role="status">
-        {pending ? "Tallennetaan käyrää…" : previous ? `Edellinen käyrä: ${previous}` : ""}
+        {pending ? "Tallennetaan käyrää…" : previous ? "Käyrä tallennettu" : ""}
       </p>
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
           className={ariButton}
-          disabled={busy || pending || !replayable || !previous}
-          onClick={() => {
-            stopReplay.current?.();
-            stopReplay.current = replayMotion({
-              position: position as number,
-              duration: duration as number,
-              passes: 2,
-            });
-          }}
+          disabled={busy || pending}
+          onClick={() => window.dispatchEvent(new Event("ari-open-versions"))}
         >
           Vertaa edelliseen
         </button>
@@ -315,7 +302,7 @@ export function AriEase({
       {previous && (
         <p className="flex items-center gap-2 text-xs text-neutral-300">
           <MiniCurveSvg ease={previous} active={false} size={18} />
-          <span>vertailu vain paneelissa — lähteessä on nykyinen käyrä</span>
+          <span>Edellinen tuntuma — vertaa tallennetut versiot erillisessä näkymässä</span>
         </p>
       )}
       {frames && (

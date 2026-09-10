@@ -1,3 +1,7 @@
+import { registerAriNotebookRoutes } from "./routes/ariNotebook.js";
+import { registerAriReviewRoutes } from "./routes/ariReview.js";
+import { registerAriVersionRoutes } from "./routes/ariVersions.js";
+import { registerAriAuthoringRoutes } from "./routes/ariAuthoring.js";
 import { Hono } from "hono";
 import type { StudioApiAdapter } from "./types.js";
 import { registerProjectRoutes } from "./routes/projects.js";
@@ -13,6 +17,7 @@ import { registerRegistryRoutes } from "./routes/registry.js";
 import { registerSelectionRoutes } from "./routes/selection.js";
 import { registerMediaRoutes } from "./routes/media.js";
 import { registerGlobalAssetRoutes } from "./routes/globalAssets.js";
+import { registerVendorScriptRoutes } from "./routes/vendorScripts.js";
 
 /**
  * Create a Hono sub-app with all studio API routes.
@@ -23,6 +28,10 @@ import { registerGlobalAssetRoutes } from "./routes/globalAssets.js";
 export function createStudioApi(adapter: StudioApiAdapter): Hono {
   const api = new Hono();
 
+  registerAriAuthoringRoutes(api, adapter);
+  registerAriVersionRoutes(api, adapter);
+  registerAriNotebookRoutes(api, adapter);
+  registerAriReviewRoutes(api, adapter);
   registerProjectRoutes(api, adapter);
   registerStoryboardRoutes(api, adapter);
   registerFileRoutes(api, adapter);
@@ -36,6 +45,7 @@ export function createStudioApi(adapter: StudioApiAdapter): Hono {
   registerFontRoutes(api);
   registerRegistryRoutes(api, adapter);
   registerGlobalAssetRoutes(api);
+  registerVendorScriptRoutes(api);
 
   return api;
 }

@@ -83,8 +83,10 @@ try {
     return call("studio_look");
   }
   const before = await lookReady();
-  assert.equal(await page.evaluate(() => window.ariStudio.tools().length), 12);
-  report.checks.push("12 real tools available without injected WebMCP harness");
+  // The registry grew with the authoring, version, notebook and review tools;
+  // `useStudioAgentTools.test.tsx` pins the same number.
+  assert.equal(await page.evaluate(() => window.ariStudio.tools().length), 36);
+  report.checks.push("36 real tools available without injected WebMCP harness");
   const buttons = page.locator("button::-p-text(Liikkeen tallennus: pois)");
   assert.equal(
     await buttons
@@ -113,6 +115,9 @@ try {
     )) !== "true"
   )
     await page.locator("button::-p-text(Ari-ohjaamo)").click();
+  // The panel is tabbed now, and a fresh selection opens on whichever tab the
+  // panel last used; the plain text field lives under Teksti.
+  await page.locator("button[role=tab]::-p-text(Teksti)").click();
   await page.locator('[aria-label="Mainosteksti"]').fill("Valitse oma tyyli.");
   await page.locator("button::-p-text(Tallenna teksti)").click();
   await page.waitForFunction(
@@ -184,6 +189,10 @@ try {
     )) !== "true"
   )
     await page.locator("button::-p-text(Ari-ohjaamo)").click();
+  // The frame capture reloads the preview and drops the selection with it, so
+  // the outline under test needs its target chosen again.
+  assert((await call("studio_select", { handle: target.handle })).ok);
+  await page.waitForSelector('[data-dom-edit-selection-box="true"]');
   // Closing the panel changes the canvas scale. Wait for the overlay RAF to
   // follow the new geometry before judging or clicking its visible handles.
   let stableGeometryCount = 0;

@@ -442,3 +442,23 @@ describe("useDomSelection — picking a clip with no canvas node", () => {
     harness.cleanup();
   });
 });
+
+it("shares a revision for new choices and clears, but not preview rebindings", () => {
+  const harness = renderHarness({
+    rightPanelTab: "design",
+    setRightPanelTab: vi.fn(),
+    iframe: null,
+    timelineElements: [],
+  });
+  const selection = makeSelection("A", document.createElement("div"));
+  const start = harness.current().selectionRevisionRef.current;
+  act(() => harness.current().applyDomSelection(selection));
+  expect(harness.current().selectionRevisionRef.current).toBe(start + 1);
+  act(() => harness.current().applyDomSelection(selection, { preserveRevision: true }));
+  expect(harness.current().selectionRevisionRef.current).toBe(start + 1);
+  act(() => harness.current().applyMarqueeSelection([selection], false));
+  expect(harness.current().selectionRevisionRef.current).toBe(start + 2);
+  act(() => harness.current().clearDomSelection());
+  expect(harness.current().selectionRevisionRef.current).toBe(start + 3);
+  harness.cleanup();
+});

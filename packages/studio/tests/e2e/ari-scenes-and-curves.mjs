@@ -104,13 +104,31 @@ const browser = await puppeteer.launch({
   executablePath: resolveChromeExecutable(),
   headless: !headed,
   devtools: false,
-  args: ["--no-first-run"],
+  // Offline before the first navigation. `--host-resolver-rules` makes every
+  // host but this server unresolvable, so a CDN script cannot load even if
+  // something asks for one. CDP request interception would do the same, but it
+  // serialises every request through the driver and the studio's own save/undo
+  // round trip then misses its budget — the block belongs in the browser.
+  args: [
+    "--no-first-run",
+    "--disable-background-networking",
+    "--disable-component-update",
+    "--disable-sync",
+    "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost",
+  ],
 });
 const page = await browser.newPage();
 page.setDefaultTimeout(90000);
 await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
 const errors = [];
+const externalRequests = [];
 const selectionDebug = [];
+// Offline before the first navigation: nothing outside this server may be
+// fetched, font requests included.
+const isLocal = (url) => url.startsWith(origin) || /^(data|blob|about|chrome):/.test(url);
+page.on("request", (request) => {
+  if (!isLocal(request.url())) externalRequests.push(request.url());
+});
 await page.evaluateOnNewDocument(() => localStorage.setItem("hf-select-debug", "1"));
 page.on("console", (message) => {
   if (message.text().includes("[hf-select]")) selectionDebug.push(message.text());
@@ -187,11 +205,24 @@ const logLength = () => page.evaluate(() => window.__ariLog.length);
 /** Click a layer row by its exact label; `nth` picks between the rows a scene
  * hosted twice produces. Real mouse click, so it works in ui-only mode too. */
 async function clickLayer(label, nth = 0) {
+  // A source write reloads the preview and the layer list with it, so the row
+  // may not exist for a moment after one.
+  await page.waitForFunction(
+    (label, nth) =>
+      [...document.querySelectorAll('[aria-label="Tasot"] button')].filter((row) => {
+        const own = row.querySelector("span")?.textContent?.trim();
+        return own === label || own?.startsWith(`${label} · `);
+      }).length > nth,
+    {},
+    label,
+    nth,
+  );
   const rows = await page.$$('[aria-label="Tasot"] button');
   const hits = [];
   for (const row of rows) {
     const own = await row.evaluate((element) => element.querySelector("span")?.textContent?.trim());
-    if (own === label) hits.push(row);
+    // A row inside a scene names its placement too: "Pack1 · Ensimmäinen".
+    if (own === label || own?.startsWith(`${label} · `)) hits.push(row);
   }
   assert(hits[nth], `no layer row ${nth} labelled ${label}`);
   return act("studio_select", () => hits[nth].click());
@@ -227,11 +258,31 @@ async function clickIn(scope, label) {
   }
   throw new Error(`no button ${label} in scope`);
 }
+/**
+ * The curve panel of one motion, with its own disclosure opened. Every motion
+ * has a "Tarkat käyräsäädöt" disclosure and they all start closed; a control
+ * inside a closed one has no box, so a pointer drag would land on nothing.
+ */
+async function openCurvePanel(motion) {
+  await page.evaluate((motion) => {
+    document
+      .querySelector(`[aria-label="Liike ${motion} käyrä"]`)
+      ?.closest("details")
+      ?.setAttribute("open", "");
+  }, motion);
+  const panel = await page.waitForSelector(`[aria-label="Liike ${motion} käyrä"]`);
+  await panel.evaluate((element) => element.scrollIntoView({ block: "center" }));
+  return panel;
+}
+
 /** Which "Liike N" panel holds the motion that starts at `position`. */
 async function motionIndexAt(position) {
   const index = await page.evaluate((wanted) => {
     const fields = [...document.querySelectorAll("input[aria-label]")].filter((input) =>
-      /^Liike \d+ alkaa( kohtauksessa)? \(s\)$/.test(input.getAttribute("aria-label")),
+      // The dual-time form renamed these to "Liike N · Kohtauksessa (s)".
+      /^Liike \d+ (alkaa( kohtauksessa)?|· Kohtauksessa) \(s\)$/.test(
+        input.getAttribute("aria-label"),
+      ),
     );
     const hit = fields.find((input) => Number(input.value.replace(",", ".")) === wanted);
     return hit ? Number(/Liike (\d+)/.exec(hit.getAttribute("aria-label"))[1]) : 0;
@@ -241,17 +292,31 @@ async function motionIndexAt(position) {
 }
 
 /** Open a disclosure by clicking its summary, the way a human does. */
-async function openDetails(label) {
+/**
+ * Open a disclosure by clicking its summary, and make sure it stayed open: a
+ * state change elsewhere in the panel (choosing a placement, say) remounts the
+ * form a beat later and the freshly opened details came back closed, so the
+ * field inside it was never fillable. A user clicks it again; so does this.
+ */
+async function summaryFor(label) {
   for (const summary of await page.$$("summary")) {
-    const own = await summary.evaluate((element) => ({
-      text: element.textContent ?? "",
-      open: element.parentElement?.open === true,
-    }));
-    if (!own.text.includes(label)) continue;
-    if (!own.open) await summary.click();
-    return;
+    const text = await summary.evaluate((element) => element.textContent ?? "");
+    if (text.includes(label)) return summary;
   }
-  throw new Error(`no disclosure labelled ${label}`);
+  return null;
+}
+const detailsIsOpen = (summary) =>
+  summary.evaluate((element) => element.parentElement?.open === true);
+
+async function openDetails(label) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const summary = await summaryFor(label);
+    if (!summary) throw new Error(`no disclosure labelled ${label}`);
+    if (await detailsIsOpen(summary)) return;
+    await summary.click();
+    spawnSync("sleep", ["0.25"]);
+  }
+  throw new Error(`disclosure ${label} would not stay open`);
 }
 
 /** studio_look / studio_inspect without driving anything: the visible command
@@ -299,6 +364,10 @@ const PACK_DURATION = 0.6;
 const HEADLINE_MASTER = 5.8;
 const HEADLINE_DURATION = 0.9; // scene-local; 0,60 s of master at rate 1,5
 const CURVE = { x1: 0.25, y1: 0.9, x2: 0.4, y2: 1 };
+// What the layer row and the target readout call the offer block once its scene
+// has been written once: the serialised DOM carries `id="headline-card-offer"`,
+// and an id outranks the `.hc-offer` class in buildElementLabel.
+const HEADLINE_LAYER = "Headline Card Offer";
 const EXACT_EASE = `custom(M0,0 C${CURVE.x1},${CURVE.y1} ${CURVE.x2},${CURVE.y2} 1,1)`;
 
 try {
@@ -327,7 +396,7 @@ try {
   let added;
   if (uiOnly) {
     await openDetails("Lisää uusi liike");
-    await fill("Uusi liike alkaa pääajassa (s)", String(PACK_MASTER).replace(".", ","));
+    await fill("Uusi liike · Koko videossa (s)", String(PACK_MASTER).replace(".", ","));
     await fill("Uusi liike kesto (s)", String(PACK_DURATION).replace(".", ","));
     added = await act("studio_add_animation", () => button("Lisää liike").click());
   } else {
@@ -358,10 +427,16 @@ try {
   );
 
   // 3. One completed drag on the curve = exactly one write.
+  // The write reloaded the preview and dropped the selection with it, and the
+  // motion controls only exist while their own tab is open.
+  await clickLayer("Pack1");
+  await page.locator("button[role=tab]::-p-text(Liike)").click();
   const motion = await motionIndexAt(added.scene.localPosition);
   report.motionIndex = motion;
-  const panel = await page.waitForSelector(`[aria-label="Liike ${motion} käyrä"]`);
-  await panel.evaluate((element) => element.scrollIntoView({ block: "center" }));
+  // The curve panel lives inside a closed disclosure now, and every motion has
+  // one, so the right disclosure is the one that owns this motion's panel: a
+  // handle inside a closed one has no box to grab and the drag lands on nothing.
+  const panel = await openCurvePanel(motion);
   const mark = await logLength();
   const mark0 = (await snapshot())?.id ?? 0;
   const knob = await panel.waitForSelector(
@@ -383,9 +458,10 @@ try {
 
   // 4. The same curve as four numbers, so both modes end at the same bytes.
   // The whole motion form is keyed on its ease, so the accepted drag remounted
-  // the panel captured above; take a fresh one.
-  const numbersPanel = await page.waitForSelector(`[aria-label="Liike ${motion} käyrä"]`);
-  await numbersPanel.evaluate((element) => element.scrollIntoView({ block: "center" }));
+  // the panel captured above — and dropped the selection with it.
+  await clickLayer("Pack1");
+  await page.locator("button[role=tab]::-p-text(Liike)").click();
+  const numbersPanel = await openCurvePanel(motion);
   for (const [label, value] of [
     ["X1", CURVE.x1],
     ["Y1", CURVE.y1],
@@ -407,6 +483,7 @@ try {
   report.checks.push("the four control-point fields wrote the exact curve read back from source");
 
   // 5. studio_inspect returns the curve's control points, not just its name.
+  await clickLayer("Pack1");
   const inspected = await readTool("studio_inspect");
   const curved = inspected.animations.find(
     (one) => one.easeCurve?.kind === "custom" && one.position === added.scene.localPosition,
@@ -426,8 +503,19 @@ try {
   assert.equal(selection, "Hc Offer");
   let refused;
   if (uiOnly) {
+    // Clicking a layer row picks a placement with it, so the panel starts with one
+    // chosen. The refusal this step is about is the one a user meets after putting
+    // the picker back to "Valitse esiintymä…", which is a real option in the form.
+    await page.locator("button[role=tab]::-p-text(Liike)").click();
+    await openDetails("Esiintymän valinta ja ajoitus");
+    await page.select('[aria-label="Esiintymä"]', "");
+    assert.equal(
+      await page.$eval('[aria-label="Esiintymä"]', (element) => element.value),
+      "",
+      "the placement picker kept a choice",
+    );
     await openDetails("Lisää uusi liike");
-    await fill("Uusi liike alkaa (s)", "0,3");
+    await fill("Uusi liike · Kohtauksessa (s)", "0,3");
     await fill("Uusi liike kesto (s)", String(HEADLINE_DURATION).replace(".", ","));
     refused = await act("studio_add_animation", () => button("Lisää liike").click());
   } else {
@@ -454,9 +542,26 @@ try {
   let headlineAdd;
   if (uiOnly) {
     await page.select('[aria-label="Esiintymä"]', FIXTURE.hostB);
-    await page.waitForSelector('[aria-label="Uusi liike alkaa pääajassa (s)"]');
-    await fill("Uusi liike alkaa pääajassa (s)", String(HEADLINE_MASTER).replace(".", ","));
-    await fill("Uusi liike kesto (s)", String(HEADLINE_DURATION).replace(".", ","));
+    // Choosing a placement remounts the form, which closes the disclosure again
+    // and empties the fields it holds. Open it after the choice and read both
+    // values back, so a remount is a named failure and not a lost click.
+    await openDetails("Lisää uusi liike");
+    await page.waitForSelector('[aria-label="Uusi liike · Koko videossa (s)"]');
+    const master = String(HEADLINE_MASTER).replace(".", ",");
+    const length = String(HEADLINE_DURATION).replace(".", ",");
+    await fill("Uusi liike · Koko videossa (s)", master);
+    await fill("Uusi liike kesto (s)", length);
+    for (const [label, value] of [
+      ["Uusi liike · Koko videossa (s)", master],
+      ["Uusi liike kesto (s)", length],
+    ]) {
+      await page.waitForFunction(
+        (label, value) => document.querySelector(`[aria-label="${label}"]`)?.value === value,
+        { timeout: 10000 },
+        label,
+        value,
+      );
+    }
     headlineAdd = await act("studio_add_animation", () => button("Lisää liike").click());
   } else {
     const handle = (await bridge("studio_look")).selection.handle;
@@ -488,9 +593,23 @@ try {
   // Work on the selected occurrence while it is visible, as in the manual UX flow.
   await fill("Aika sekunteina", "5,8");
   await act("studio_seek", () => button("Siirry").click());
-  // The curve editor and frame sampler must keep the chosen occurrence too.
+  // The curve editor and frame sampler must keep the chosen occurrence too. The
+  // add dropped the selection, so the second placement is chosen again by hand.
+  // The row is no longer called "Hc Offer": writing the scene serialises the live
+  // DOM, which carries an `id` mirroring `data-hf-id`, and an id outranks a class
+  // in buildElementLabel — so the row this run just edited renamed itself to the
+  // id-derived label. Click placement B's own row (nth 1) and let the picker
+  // confirm it, rather than reading the pre-write name.
+  await clickLayer(HEADLINE_LAYER, 1);
+  await page.locator("button[role=tab]::-p-text(Liike)").click();
+  await page.select('[aria-label="Esiintymä"]', FIXTURE.hostB);
+  assert.equal(
+    await page.$eval('[aria-label="Esiintymä"]', (element) => element.value),
+    FIXTURE.hostB,
+    "the placement picker does not show the second occurrence",
+  );
   const nestedIndex = await motionIndexAt(0.3);
-  const nestedPanel = await page.$(`[aria-label="Liike ${nestedIndex} käyrä"]`);
+  const nestedPanel = await openCurvePanel(nestedIndex);
   assert(nestedPanel);
   for (const [label, value] of Object.entries({ X1: 0.25, Y1: 0.9, X2: 0.4, Y2: 1 }))
     await typeInto(nestedPanel, label, value);
@@ -502,12 +621,15 @@ try {
   assert.equal(nestedCurve.scene.localPosition, 0.3);
   assert.equal(nestedCurve.scene.masterPosition, 5.8);
   await page.waitForFunction(
-    () =>
-      document.querySelector('[data-testid="ari-target"]')?.textContent === "Headline Card Offer",
+    (label) => document.querySelector('[data-testid="ari-target"]')?.textContent === label,
     { timeout: 10000 },
+    HEADLINE_LAYER,
   );
+  await page.locator("button[role=tab]::-p-text(Liike)").click();
   const restoredIndex = await motionIndexAt(0.3);
-  const freshPanel = await page.$(`[aria-label="Liike ${restoredIndex} käyrä"]`);
+  // Same closed disclosure as every other motion: open this one before reaching
+  // for a control inside it, or the click lands on a box that has no size.
+  const freshPanel = await openCurvePanel(restoredIndex);
   const nestedSamples = await act("studio_frame", () =>
     clickIn(freshPanel, "Ruutukuvat 25/50/75 %"),
   );
@@ -520,14 +642,18 @@ try {
     "nested curve and frame samples use the chosen occurrence at master 5.95/6.10/6.25 s",
   );
 
-  // 8. The bar on the MASTER rail, with the retiming named.
-  await page.waitForFunction(() =>
-    document
-      .querySelector('[aria-label="Kevyt aikajana"]')
-      ?.innerText.includes("pääaika 5.80–6.40 s"),
+  // 8. The bar on the MASTER rail, with the retiming named. The dual-time form
+  // renamed the rail's own wording to "Kohtauksessa … · Koko videossa …" and
+  // writes Finnish decimals; the numbers claimed are the same two clocks.
+  const railRow = `Liike ${restoredIndex} · Kohtauksessa 0,30–1,20 s · Koko videossa 5,80–6,40 s`;
+  await page.waitForFunction(
+    (row) => document.querySelector('[aria-label="Kevyt aikajana"]')?.innerText.includes(row),
+    {},
+    railRow,
   );
+  report.railRow = railRow;
   const badge = await page.$eval(
-    '[aria-label="Liike 1 toistonopeus ×1,5"]',
+    `[aria-label="Liike ${restoredIndex} toistonopeus ×1,5"]`,
     (element) => element.textContent,
   );
   assert.equal(badge, "×1,5");
@@ -552,9 +678,9 @@ try {
 
   // 10. Three revision-bound frames from one call, inside the motion's own span.
   await clickLayer("Pack1");
+  await page.locator("button[role=tab]::-p-text(Liike)").click();
   const sampleIndex = await motionIndexAt(added.scene.localPosition);
-  const samplePanel = await page.waitForSelector(`[aria-label="Liike ${sampleIndex} käyrä"]`);
-  await samplePanel.evaluate((element) => element.scrollIntoView({ block: "center" }));
+  const samplePanel = await openCurvePanel(sampleIndex);
   let samples;
   if (uiOnly) {
     samples = await act("studio_frame", () => clickIn(samplePanel, "Ruutukuvat 25/50/75 %"));
@@ -596,6 +722,10 @@ try {
   report.checks.push("1440x900 and 1280x800 both expose the layers, the dock and the timeline");
 
   // 12. Export through the UI download.
+  // The export lives under the Tarkistus tab of the tabbed panel; the run has
+  // been on Liike since the curve edit.
+  await page.locator("button[role=tab]::-p-text(Tarkistus)").click();
+  await page.waitForSelector('[aria-label="Videon vienti"] button:not([disabled])');
   const downloadDir = join(evidence, "downloads");
   const { completed: downloadComplete } = await prepareDownload(page, downloadDir, 300000);
   const { event, video } = await downloadExport(page, downloadDir, downloadComplete, 300000);
@@ -624,6 +754,12 @@ try {
     "matched frames from the MP4 show placement B reaching in 0,60 s of master what A needs 0,90 s for",
   );
 
+  // Frame-exact comparison across the two modes: the container carries a
+  // creation time, so two identical renders differ in sha256 while every decoded
+  // frame is the same. `framemd5` is the picture, not the wrapper.
+  const decoded = frameDigest(video);
+  report.video.framesSha256 = decoded.sha256;
+  report.video.frames = decoded.frames;
   report.sceneHashes = {
     "scenes/headline-card.html": sha(headlineScene),
     "scenes/pack-grid.html": sha(packScene),
@@ -636,23 +772,60 @@ try {
       other.suiteVersion === report.suiteVersion &&
       other.fixtureRevision === report.fixtureRevision
     ) {
-      report.comparedWith = { mode: other.mode, sceneHashes: other.sceneHashes };
+      report.comparedWith = {
+        mode: other.mode,
+        sceneHashes: other.sceneHashes,
+        framesSha256: other.video?.framesSha256 ?? null,
+      };
       assert.deepEqual(
         report.sceneHashes,
         other.sceneHashes,
         "the two modes wrote different source",
       );
       report.checks.push("script+UI and UI-only runs end with byte-identical scene sources");
+      assert(other.video?.path && existsSync(other.video.path), "the other mode kept no MP4");
+      assert.equal(report.video.frames, other.video.frames, "the two MP4s are different lengths");
+      // Tolerance, and why it is not zero: the mixed run is headless and the
+      // ui-only run is headed, and Chrome rasterises text through a different
+      // path in each, so identical sources still differ by fractions of one
+      // 8-bit level. 60 dB PSNR is an order of magnitude below that quantisation
+      // floor; a real difference — a moved element, a wrong ease — lands far
+      // under it. The measured worst frame is recorded beside the threshold.
+      report.videoComparison = comparePictures(report.video.path, other.video.path);
+      const worst = report.videoComparison.minPsnr;
+      assert(worst === "identical" || worst >= 60, JSON.stringify(report.videoComparison, null, 2));
+      report.checks.push(
+        worst === "identical"
+          ? `both modes exported frame-identical MP4s (all ${report.videoComparison.frames} frames)`
+          : `both modes exported the same picture (worst frame ${worst} dB PSNR, floor 60 dB)`,
+      );
     }
   }
 
   report.pageErrors = errors;
+  report.externalRequests = externalRequests;
   assert.equal(errors.length, 0, JSON.stringify(errors));
+  assert.deepEqual(externalRequests, [], "the run reached outside the studio server");
   report.ok = true;
 } catch (error) {
   report.error = error.stack;
   report.pageErrors = errors;
+  report.externalRequests = externalRequests;
   report.selectionDebug = selectionDebug;
+  // The layer rows a failure saw: a stale label is otherwise invisible in the report.
+  report.targetReadout = await page
+    .evaluate(() => document.querySelector('[data-testid="ari-target"]')?.textContent ?? null)
+    .catch(() => "unavailable");
+  report.lightTimeline = await page
+    .evaluate(() => document.querySelector('[aria-label="Kevyt aikajana"]')?.innerText ?? null)
+    .catch(() => "unavailable");
+  report.layerRows = await page
+    .evaluate(() =>
+      [...document.querySelectorAll('[aria-label="Tasot"] button')].map((row) =>
+        row.querySelector("span")?.textContent?.trim(),
+      ),
+    )
+    .catch(() => "unavailable");
   report.previewDiagnostics = await Promise.all(
     page.frames().map(async (frame) => ({
       url: frame.url(),
@@ -698,6 +871,66 @@ try {
  * detection as examples/rajamarket-scenes/evidence/measure-headline.py, run on
  * raw RGB straight out of ffmpeg so no PNG decoder is needed.
  */
+/**
+ * Per-frame PSNR between two renders of the same source. Returns the worst and
+ * the mean over every frame, so a claim about them can name a number.
+ */
+function comparePictures(a, b) {
+  const stats = join(evidence, "cross-mode-psnr.log");
+  const run = spawnSync(
+    "ffmpeg",
+    [
+      "-v",
+      "error",
+      "-i",
+      a,
+      "-i",
+      b,
+      "-filter_complex",
+      `psnr=stats_file=${stats}`,
+      "-f",
+      "null",
+      "-",
+    ],
+    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+  );
+  assert.equal(run.status, 0, run.stderr);
+  const values = readFileSync(stats, "utf8")
+    .split("\n")
+    .flatMap((line) => line.split(/\s+/).filter((token) => token.startsWith("psnr_avg:")))
+    .map((token) => token.slice("psnr_avg:".length))
+    .map((value) => (value === "inf" ? Number.POSITIVE_INFINITY : Number(value)))
+    .filter((value) => !Number.isNaN(value));
+  assert(values.length > 0, "ffmpeg produced no PSNR statistics");
+  // A frame that matches bit for bit has no finite PSNR; ffmpeg prints `inf`.
+  // Report those as what they are rather than as a number JSON cannot carry.
+  const finite = values.filter(Number.isFinite);
+  return {
+    statsFile: stats,
+    frames: values.length,
+    identicalFrames: values.length - finite.length,
+    minPsnr: finite.length ? Math.min(...finite) : "identical",
+    meanPsnr: finite.length
+      ? Math.round((finite.reduce((sum, one) => sum + one, 0) / finite.length) * 100) / 100
+      : "identical",
+  };
+}
+
+/** sha256 over ffmpeg's per-frame md5 list: the picture, not the container. */
+function frameDigest(video) {
+  const run = spawnSync("ffmpeg", ["-v", "error", "-i", video, "-f", "framemd5", "-"], {
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  assert.equal(run.status, 0, run.stderr);
+  const rows = run.stdout.split("\n").filter((line) => line && !line.startsWith("#"));
+  assert(rows.length > 0, "ffmpeg produced no frame checksums");
+  return {
+    frames: rows.length,
+    sha256: createHash("sha256").update(rows.join("\n")).digest("hex"),
+  };
+}
+
 function measureRate(video, framesDir) {
   mkdirSync(framesDir, { recursive: true });
   // Even width and height: ffmpeg's crop rounds an odd size down on 4:2:0 video,

@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DomEditSelection } from "../components/editor/domEditingTypes";
 import { useGsapAnimationOps } from "./useGsapAnimationOps";
+import type { CutoverDeps } from "../utils/sdkEditTransaction";
 import type { SceneTimeManifestClip } from "../ari/sceneTime";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -22,6 +23,7 @@ function renderOps(
   commitMutationSafely: (...args: unknown[]) => Promise<void>,
   commitMutation: (...args: unknown[]) => Promise<void> = vi.fn(async () => undefined),
   getClipManifest?: () => readonly SceneTimeManifestClip[] | null,
+  sdkDeps: CutoverDeps | null = null,
 ): HookApi {
   const captured: { api: HookApi | null } = { api: null };
   function Probe() {
@@ -33,7 +35,7 @@ function renderOps(
       commitMutationSafely,
       showToast: vi.fn(),
       sdkSession: null,
-      sdkDeps: null,
+      sdkDeps,
     });
     return null;
   }
@@ -54,6 +56,49 @@ function deferredCommit() {
 }
 
 describe("useGsapAnimationOps settlement", () => {
+  it("routes id-less nested add through one atomic writer without a patch POST", async () => {
+    let disk = `<html><body><h1 data-hf-id="title">Moi</h1><script>const tl=gsap.timeline({paused:true});window.__timelines={scene:tl};</script></body></html>`;
+    const original = disk;
+    const recordEdit = vi.fn(async () => {});
+    const writeProjectFile = vi.fn(async (_path: string, after: string, expected?: string) => {
+      expect(expected).toBe(disk);
+      disk = after;
+    });
+    const commit = vi.fn(async () => undefined);
+    const api = renderOps(vi.fn(), commit, undefined, {
+      editHistory: { recordEdit },
+      writeProjectFile,
+      readProjectFile: async () => disk,
+      reloadPreview: vi.fn(),
+      domEditSaveTimestampRef: { current: 0 },
+    });
+    const doc = document.implementation.createHTMLDocument();
+    doc.body.innerHTML =
+      '<h1 class="shared" data-hf-id="title">Moi</h1><h1 class="shared">Muu</h1>';
+    const element = doc.querySelector<HTMLElement>("h1")!;
+    await api.addGsapAnimation(
+      {
+        ...selection,
+        id: null,
+        hfId: "title",
+        selector: ".shared",
+        sourceFile: "scene.html",
+        element,
+      },
+      "from",
+      undefined,
+      { position: 0.3 },
+    );
+    expect(writeProjectFile).toHaveBeenCalledTimes(1);
+    expect(recordEdit).toHaveBeenCalledWith(
+      expect.objectContaining({ files: { "scene.html": { before: original, after: disk } } }),
+    );
+    expect(commit).not.toHaveBeenCalled();
+    expect(element.hasAttribute("id")).toBe(false);
+    expect(disk).toContain('id="title"');
+    expect(disk).toContain("tl.from(");
+  });
+
   it("inserts a root animation at the requested playhead rather than the clip start", async () => {
     const commit = vi.fn(async () => undefined);
     const api = renderOps(

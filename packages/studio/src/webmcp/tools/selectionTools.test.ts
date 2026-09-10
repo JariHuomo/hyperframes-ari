@@ -266,7 +266,15 @@ function sceneSelectionDeps(
   sourceFile: string,
   overrides: Partial<SelectionToolDeps> = {},
 ): { doc: Document; deps: SelectionToolDeps } {
-  const doc = previewDoc('<h1 id="headline" data-hf-id="abc">Ship it</h1>');
+  const hosts = sourceFile === TITLE_SCENE ? ["title-host-a", "title-host-b"] : ["pack-host"];
+  const doc = previewDoc(
+    hosts
+      .map(
+        (id) =>
+          `<div id="${id}" data-hf-id="${id}" data-composition-src="${sourceFile}"><h1 id="headline" data-hf-id="abc">Ship it</h1></div>`,
+      )
+      .join(""),
+  );
   return {
     doc,
     deps: selectionDeps({
@@ -280,6 +288,14 @@ function sceneSelectionDeps(
 }
 
 describe("studioSelect · scene instances", () => {
+  it("discards a remembered placement removed by a structural edit", async () => {
+    sceneInstanceChoice.reset();
+    sceneInstanceChoice.choose(PACK_SCENE, "deleted-host");
+    const { deps } = sceneSelectionDeps(PACK_SCENE);
+    const result = expectOk<StudioSelectResult>(await studioSelect(deps, "hf:abc"));
+    expect(result.scene?.instance).toBe("pack-host");
+    sceneInstanceChoice.reset();
+  });
   it("lists every placement of a shared scene and chooses none of them", async () => {
     sceneInstanceChoice.reset();
     const { deps } = sceneSelectionDeps(TITLE_SCENE);
@@ -297,12 +313,15 @@ describe("studioSelect · scene instances", () => {
 
   it("remembers an explicit instance and auto-selects a single placement", async () => {
     sceneInstanceChoice.reset();
-    const shared = sceneSelectionDeps(TITLE_SCENE);
+    const applySelection = vi.fn();
+    const shared = sceneSelectionDeps(TITLE_SCENE, { applySelection });
 
     const chosen = expectOk<StudioSelectResult>(
       await studioSelect(shared.deps, "hf:abc", "title-host-b"),
     );
     expect(chosen.scene?.instance).toBe("title-host-b");
+    expect(applySelection.mock.calls[0][0].element.parentElement.id).toBe("title-host-b");
+    expect(applySelection.mock.calls[0][0].instanceId).toBe("title-host-b");
     expect(sceneInstanceChoice.forSource(TITLE_SCENE)).toBe("title-host-b");
 
     const single = sceneSelectionDeps(PACK_SCENE);

@@ -2,6 +2,7 @@ import { createEmptyEditHistory, type EditHistoryState } from "./editHistory";
 
 export interface EditHistoryStorageAdapter {
   get(projectId: string): Promise<EditHistoryState | null>;
+  refresh?(projectId: string, readSources: () => Promise<void>): Promise<EditHistoryState | null>;
   set(projectId: string, state: EditHistoryState): Promise<void>;
   delete(projectId: string): Promise<void>;
 }
@@ -54,8 +55,14 @@ function withStore<T>(
         const tx = db.transaction(STORE_NAME, mode);
         const request = callback(tx.objectStore(STORE_NAME));
         request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed"));
-        request.onsuccess = () => resolve(request.result);
-        tx.oncomplete = () => db.close();
+        tx.oncomplete = () => {
+          db.close();
+          resolve(request.result);
+        };
+        tx.onabort = () => {
+          db.close();
+          reject(tx.error ?? new Error("IndexedDB transaction aborted"));
+        };
         tx.onerror = () => {
           db.close();
           reject(tx.error ?? new Error("IndexedDB transaction failed"));
