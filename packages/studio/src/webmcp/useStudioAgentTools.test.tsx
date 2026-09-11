@@ -201,6 +201,9 @@ describe("useStudioAgentTools", () => {
       "studio_read_review_package",
       "studio_record_review_assessment",
       "studio_read_review_assessments",
+      "studio_quote_creative_feedback",
+      "studio_run_creative_feedback",
+      "studio_read_creative_feedback",
     ]);
     expect(trackEvent).toHaveBeenCalledWith("webmcp.native_present");
   });
@@ -215,14 +218,14 @@ describe("useStudioAgentTools", () => {
     await act(async () => {
       harness = mountTools(deps({ getSnapshot: () => snapshot() }));
     });
-    expect(registerTool).toHaveBeenCalledTimes(36);
+    expect(registerTool).toHaveBeenCalledTimes(39);
 
     await act(async () => {
       harness?.rerenderWith(deps({ getSnapshot: () => snapshot({ currentTime: 5 }) }));
       harness?.rerenderWith(deps({ getSnapshot: () => snapshot({ currentTime: 6 }) }));
     });
 
-    expect(registerTool).toHaveBeenCalledTimes(36);
+    expect(registerTool).toHaveBeenCalledTimes(39);
   });
 
   it("executes against the LATEST deps, not the ones present at registration", async () => {
@@ -294,7 +297,7 @@ describe("useStudioAgentTools", () => {
       mountTools(deps({ getSnapshot: () => snapshot() }));
     });
 
-    expect(registerTool).toHaveBeenCalledTimes(36);
+    expect(registerTool).toHaveBeenCalledTimes(39);
   });
 
   it("reports a non-abort registration failure through production telemetry", async () => {

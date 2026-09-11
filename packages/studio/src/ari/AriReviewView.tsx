@@ -70,6 +70,11 @@ export function AriReviewView({ projectId, pkg }: { projectId: string; pkg: Revi
         Paketti on katsottavaa aineistoa. Sen valmistuminen ei tarkoita, että kukaan olisi katsonut
         videon, eikä se ole laadun hyväksyntä.
       </p>
+      {pkg.overview && (
+        <a href={url(pkg.overview.path)} download="mainoksen-kuvakooste.png">
+          Lataa koko mainoksen kuvakooste · PNG
+        </a>
+      )}
       <video
         data-testid="ari-review-video"
         controls

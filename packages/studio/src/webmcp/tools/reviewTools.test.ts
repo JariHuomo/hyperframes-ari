@@ -31,8 +31,20 @@ it("prepares, lists and reads through one service and never claims viewing or ap
     "studio_read_review_package",
     "studio_record_review_assessment",
     "studio_read_review_assessments",
+    "studio_quote_creative_feedback",
+    "studio_run_creative_feedback",
+    "studio_read_creative_feedback",
   ]);
-  expect(tools.map((t) => t.annotations?.readOnlyHint)).toEqual([false, true, true, false, true]);
+  expect(tools.map((t) => t.annotations?.readOnlyHint)).toEqual([
+    false,
+    true,
+    true,
+    false,
+    true,
+    false,
+    false,
+    true,
+  ]);
   const prepared = await tools[0]!.execute({ versionId: "v2", previousVersionId: "v1" }, context());
   expect(prepared).toMatchObject({ ok: true, projectId: "ad", viewed: false, approved: false });
   expect(fetcher).toHaveBeenCalledWith(
@@ -160,4 +172,37 @@ it("records and reads assessments over the same service and never reports an app
     ok: false,
     reason: "Kenttä packageId puuttuu.",
   });
+});
+
+it("exposes a free quote and refuses paid script execution without explicit approval", async () => {
+  const fetcher = vi.fn(async () =>
+    Response.json({ ok: true, quote: { id: "q", maxUsd: 1.1 }, result: { advisoryOnly: true } }),
+  );
+  vi.stubGlobal("fetch", fetcher);
+  const tools = reviewTools(() => "ad");
+  const quote = tools.find((t) => t.name === "studio_quote_creative_feedback")!;
+  const run = tools.find((t) => t.name === "studio_run_creative_feedback")!;
+  // The reviewer is required and closed: an agent cannot quote a vendor the server never offered.
+  expect(await quote.execute({ packageId: "pkg" }, context())).toMatchObject({ ok: false });
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(
+    await quote.execute({ packageId: "pkg", reviewer: "muse-spark" }, context()),
+  ).toMatchObject({ ok: true, quote: { id: "q" } });
+  expect(fetcher).toHaveBeenLastCalledWith(
+    "/api/ari/projects/ad/review/pkg/feedback/quote",
+    expect.objectContaining({ body: JSON.stringify({ reviewer: "muse-spark" }) }),
+  );
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(await run.execute({ packageId: "pkg", quoteId: "q" }, context())).toMatchObject({
+    ok: false,
+    reason: "Hyväksy näytetty hinta ensin.",
+  });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(
+    await run.execute({ packageId: "pkg", quoteId: "q", approved: true }, context()),
+  ).toMatchObject({ ok: true, approved: false });
+  expect(fetcher).toHaveBeenLastCalledWith(
+    "/api/ari/projects/ad/review/pkg/feedback/run",
+    expect.objectContaining({ body: JSON.stringify({ quoteId: "q", approved: true }) }),
+  );
 });

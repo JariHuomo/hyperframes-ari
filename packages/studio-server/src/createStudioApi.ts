@@ -2,6 +2,7 @@ import { registerAriNotebookRoutes } from "./routes/ariNotebook.js";
 import { registerAriReviewRoutes } from "./routes/ariReview.js";
 import { registerAriVersionRoutes } from "./routes/ariVersions.js";
 import { registerAriAuthoringRoutes } from "./routes/ariAuthoring.js";
+import { registerAriVoiceRoutes } from "./routes/ariVoice.js";
 import { Hono } from "hono";
 import type { StudioApiAdapter } from "./types.js";
 import { registerProjectRoutes } from "./routes/projects.js";
@@ -29,6 +30,7 @@ export function createStudioApi(adapter: StudioApiAdapter): Hono {
   const api = new Hono();
 
   registerAriAuthoringRoutes(api, adapter);
+  registerAriVoiceRoutes(api, adapter);
   registerAriVersionRoutes(api, adapter);
   registerAriNotebookRoutes(api, adapter);
   registerAriReviewRoutes(api, adapter);

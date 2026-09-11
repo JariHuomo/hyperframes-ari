@@ -1,3 +1,9 @@
+import {
+  quoteCreativeFeedback,
+  runCreativeFeedback,
+  readAllCreativeFeedback,
+  creativeFeedbackOptions,
+} from "../ari/creativeFeedback.js";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { StudioApiAdapter } from "../types.js";
@@ -60,6 +66,41 @@ export function registerAriReviewRoutes(parent: Hono, adapter: StudioApiAdapter)
     saveNotebook(dir, { ...input, action: "assessment" });
     return c.json({ ...readReviewAssessments(dir), stage: "assessment_recorded" });
   });
+  api.get(`${base}/:pkg/feedback/options`, (c) =>
+    c.json({ ok: true, options: creativeFeedbackOptions() }),
+  );
+  api.post(`${base}/:pkg/feedback/quote`, async (c) => {
+    const input = await c.req.json();
+    // The reviewer is a closed id resolved server-side; model, price and key never cross the wire.
+    return c.json({
+      ok: true,
+      quote: quoteCreativeFeedback(
+        await root(c.req.param("id")),
+        c.req.param("pkg"),
+        input.reviewer,
+      ),
+    });
+  });
+  api.post(`${base}/:pkg/feedback/run`, async (c) => {
+    const input = await c.req.json();
+    const quoteId = readId(input.quoteId, "Palautepyynnön hinta puuttuu.");
+    if (input.approved !== true) throw new Error("Hyväksy näytetty hinta ensin.");
+    return c.json({
+      ok: true,
+      result: await runCreativeFeedback(
+        await root(c.req.param("id")),
+        quoteId,
+        undefined,
+        c.req.param("pkg"),
+      ),
+    });
+  });
+  api.get(`${base}/:pkg/feedback`, async (c) =>
+    c.json({
+      ok: true,
+      results: readAllCreativeFeedback(await root(c.req.param("id")), c.req.param("pkg")),
+    }),
+  );
   api.get(`${base}/:pkg`, async (c) =>
     c.json({
       ok: true,

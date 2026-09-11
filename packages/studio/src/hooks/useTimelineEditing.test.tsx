@@ -56,7 +56,7 @@ function createPreviewIframe(
   doc.body.innerHTML = clips
     .map(
       (clip) =>
-        `<div id="${clip.id}" data-start="0" data-duration="2" data-track-index="${clip.track}"${
+        `<div id="${clip.id}" data-hf-id="hf-${clip.id}" data-start="0" data-duration="2" data-track-index="${clip.track}"${
           clip.style ? ` style="${clip.style}"` : ""
         }></div>`,
     )
@@ -1102,7 +1102,7 @@ describe("useTimelineEditing timeline z-index reorder", () => {
     const doc = iframe.contentDocument;
     if (!doc) throw new Error("Expected iframe document");
     doc.body.innerHTML =
-      '<div class="cap" data-start="2" data-duration="1" data-track-index="0"></div>';
+      '<div class="cap" data-hf-id="hf-cap" data-start="2" data-duration="1" data-track-index="0"></div>';
     const liveScript = doc.createElement("script");
     liveScript.textContent =
       'window.__timelines = window.__timelines || {}; window.__timelines["root"] = { kill: function () {} };';
@@ -1244,7 +1244,7 @@ describe("useTimelineEditing timeline z-index reorder", () => {
 describe("useTimelineEditing duration rollback on failed persist", () => {
   const ROLLBACK_SOURCE = [
     `<div data-composition-id="main" data-duration="4">`,
-    `  <div id="clip" data-start="0" data-duration="2" data-track-index="0"></div>`,
+    `  <div id="clip" data-hf-id="hf-clip" data-start="0" data-duration="2" data-track-index="0"></div>`,
     `</div>`,
   ].join("\n");
 

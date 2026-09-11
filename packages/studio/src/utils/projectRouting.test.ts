@@ -24,7 +24,7 @@ describe("project routing utilities", () => {
         origin: "http://localhost:3002",
       }),
     ).toBe(
-      "http://localhost:3002/api/projects/Notion%20Showcase/thumbnail/index.html?t=1.809&format=png&output=source&v=1777636800000",
+      "http://localhost:3002/api/projects/Notion%20Showcase/thumbnail/index.html?t=1.809&format=png&output=source&evidence=1&v=1777636800000",
     );
 
     vi.useRealTimers();

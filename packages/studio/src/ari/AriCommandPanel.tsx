@@ -1,3 +1,4 @@
+import { AriCreativeFeedback } from "./AriCreativeFeedback";
 /** Ari fork: explicit command form and source-frame evidence. */
 import { useState } from "react";
 import { buildStudioLook, type StudioLookSnapshot } from "../webmcp/tools/lookTools";
@@ -118,6 +119,7 @@ export function AriCommandPanel({
             >
               Vertaa muutosta
             </button>
+            <AriCreativeFeedback busy={busy} />
             <AriReview bridge={bridge} projectId={getSnapshot().projectId} />
             <AriExport busy={busy} />
             <AriFrameEvidence call={call} />

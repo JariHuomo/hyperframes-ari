@@ -18,7 +18,6 @@ import {
   sourceRevision,
   versionDigest,
 } from "../packages/studio-server/src/ari/versionFiles";
-import { createStudioDevRenderBodyScripts } from "../packages/studio/vite.studioMotion";
 import { installOfflineServerGuard } from "../packages/studio/vite.offline";
 import type { RenderJobState } from "../packages/studio-server/src/types";
 
@@ -86,7 +85,7 @@ if (process.argv.includes("--read")) {
       fps: opts.fps,
       quality: "standard",
       format: "mp4",
-      renderBodyScripts: createStudioDevRenderBodyScripts(opts.project.dir),
+      // This fixture stores its edits in authored source; no Studio sidecar injection is needed.
     });
     execution = executeRenderJob(job, opts.project.dir, opts.outputPath).then(
       () => {

@@ -80,7 +80,8 @@
     "ari:test:review": "node packages/studio/tests/e2e/ari-review-package.mjs",
     "ari:test:repair": "node packages/studio/tests/e2e/ari-repair-limit.mjs",
     "ari:test:stop": "node packages/studio/tests/e2e/ari-stop-approval.mjs",
-    "ari:test:final": "node packages/studio/tests/e2e/ari-final-delivery.mjs"
+    "ari:test:final": "node packages/studio/tests/e2e/ari-final-delivery.mjs",
+    "validate:ari-voice-live": "tsx scripts/validate-ari-voice-live.ts"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.5.0",

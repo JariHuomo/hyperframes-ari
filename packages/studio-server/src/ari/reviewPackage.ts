@@ -1,3 +1,4 @@
+import { createReviewOverview, type ReviewOverview } from "./reviewOverview.js";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
 import { reviewDimensions, validateReviewManifest } from "./reviewValidation.js";
 import { randomUUID } from "node:crypto";
@@ -45,6 +46,8 @@ export interface ReviewPackage {
   frames: (ReviewAsset & { frame: number; time: number })[];
   boundaryFrames: BoundaryFrameAsset[];
   boundaries: ReviewBoundary[];
+  /** Optional only for packages created before overview export was added. */
+  overview?: ReviewOverview;
 }
 export interface PrepareReviewOptions {
   /** Compare against this frozen version; without it coverage is `first-version`. */
@@ -117,7 +120,9 @@ export async function prepareReviewPackage(
     if (before && previous) videos.set(previous.version.id, before.video);
     const frames = await firstAndLast(staging, "video.mp4", current.measured);
     const boundaryFrames = await captureBoundaryFrames(staging, plan.boundaries, videos);
+    const overview = await createReviewOverview(staging, current.measured);
     const manifest: ReviewPackage = {
+      overview,
       schema: 1,
       id: randomUUID(),
       versionId: snapshot.version.id,
@@ -157,6 +162,7 @@ export async function prepareReviewPackage(
 function publishedAssets(manifest: ReviewPackage): ReviewAsset[] {
   return [
     manifest.video,
+    ...(manifest.overview ? [manifest.overview] : []),
     ...(manifest.previousVideo ? [manifest.previousVideo] : []),
     ...manifest.frames,
     ...manifest.boundaryFrames,

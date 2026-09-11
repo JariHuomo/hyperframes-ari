@@ -10,6 +10,8 @@ const hookMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../hooks/useTimelineSelectionPreviewSync", () => hookMocks);
+// Agent-tool registration is a separate child; this test owns selection mirroring only.
+vi.mock("../webmcp/StudioAgentTools", () => ({ StudioAgentTools: () => null }));
 vi.mock("../contexts/StudioContext", () => ({
   useStudioPlaybackContext: () => ({
     captionEditMode: false,

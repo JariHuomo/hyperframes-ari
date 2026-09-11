@@ -1,3 +1,4 @@
+import { creativeFeedback } from "../../utils/creativeFeedback";
 import type { ModelContextTool } from "../types";
 import { toolFailure } from "../toolResult";
 import { reviewPackages } from "../../utils/reviewPackages";
@@ -55,6 +56,27 @@ const definitions = [
     description:
       "Read every package's four assessment categories with the notebook token needed to write. Each category is missing, current or stale; missing means nobody assessed it and must never be reported as passed. measured is technical ffprobe data about the render — measured.audio false means the render carried no audio stream, which leaves the audio assessment missing rather than approved. An assessment recorded against an older source revision, or one whose package can no longer be read, stays in history and is marked stale with its reasons.",
   },
+  {
+    name: "studio_quote_creative_feedback",
+    title: "AI-palautteen hinta",
+    write: true,
+    description:
+      'Prepare a server-owned price for one current frozen review package with overview. Requires reviewer, either "gemini" or "muse-spark"; any other value is refused. Returns quote id, reviewer label, model, maximum USD and expiry. Sends no media to a provider. Show the price and the named vendor\'s media disclosure before approval.',
+  },
+  {
+    name: "studio_run_creative_feedback",
+    title: "Pyydä AI-palaute",
+    write: true,
+    description:
+      "Run exactly one approved review for packageId and quoteId, against the reviewer its quote bound. Requires approved:true only after the server price and Google disclosure have been shown and spending authorized. No automatic retry; repeated completed requests reuse the result. Advisory creative feedback, never a release approval or source edit.",
+  },
+  {
+    name: "studio_read_creative_feedback",
+    title: "Lue AI-palaute",
+    write: false,
+    description:
+      "Read every persisted AI review for packageId as a list, one entry per reviewer, empty when none. Each entry has stale:true when the source changed. Does not spend or fabricate assessments.",
+  },
 ] as const;
 
 export function reviewTools(getProjectId: () => string | null): ModelContextTool[] {
@@ -65,6 +87,8 @@ export function reviewTools(getProjectId: () => string | null): ModelContextTool
     inputSchema: {
       type: "object",
       properties: {
+        quoteId: { type: "string" },
+        approved: { type: "boolean" },
         versionId: { type: "string" },
         previousVersionId: { type: ["string", "null"] },
         packageId: { type: "string" },
@@ -100,8 +124,26 @@ export function reviewTools(getProjectId: () => string | null): ModelContextTool
   }));
 }
 
+async function dispatchFeedback(name: string, projectId: string, input: object) {
+  const ai = creativeFeedback(projectId, required(input, "packageId"));
+  if (name === "studio_quote_creative_feedback")
+    return { ok: true, quote: await ai.quote(required(input, "reviewer")) };
+  if (name === "studio_read_creative_feedback") return { ok: true, results: await ai.read() };
+  if (Reflect.get(input, "approved") !== true) throw new Error("Hyväksy näytetty hinta ensin.");
+  return { ok: true, result: await ai.run(required(input, "quoteId")), approved: false };
+}
+
 /** One place where a command name becomes a call on the shared service. */
 async function dispatch(name: string, projectId: string, input: object) {
+  if (
+    [
+      "studio_quote_creative_feedback",
+      "studio_run_creative_feedback",
+      "studio_read_creative_feedback",
+    ].includes(name)
+  ) {
+    return dispatchFeedback(name, projectId, input);
+  }
   const service = reviewPackages(projectId);
   if (name === "studio_read_review_assessments")
     return { ...(await service.assessments()), projectId, approved: false };
@@ -146,6 +188,7 @@ function receipt(
     viewed: false,
     approved: false,
     assetUrls: {
+      overview: manifest.overview ? url(manifest.overview.path) : null,
       video: url(manifest.video.path),
       previousVideo: manifest.previousVideo ? url(manifest.previousVideo.path) : null,
       frames: manifest.frames.map((frame) => ({ ...frame, url: url(frame.path) })),

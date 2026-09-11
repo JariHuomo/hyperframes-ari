@@ -18,6 +18,7 @@ import { AriLayers } from "./AriLayers";
 import { buildStudioLook } from "../webmcp/tools/lookTools";
 import { AriCommandPanel } from "./AriCommandPanel";
 import { ariButton as button } from "./styles";
+import { AriVoice } from "./AriVoice";
 
 const subscribeEmpty = () => () => {};
 const emptySnapshot = () => null;
@@ -99,6 +100,7 @@ export function AriControlPanel({
           {focusMode ? "Näytä työkalupaneelit" : "Kuva isoksi"}
         </button>
         {bridge && <AriStructureButtons bridge={bridge} snapshot={getSnapshot()} />}
+        <AriVoice projectId={getSnapshot().projectId} />
         <AriSelection />
         <label className="flex items-center gap-2 text-sm">
           Koko videossa (s)

@@ -7,7 +7,7 @@ import { usePlayerStore } from "../player";
 import { useRazorSplit } from "./useRazorSplit";
 import { createPersistentEditHistoryStore } from "./usePersistentEditHistory";
 import { createEmptyEditHistory } from "../utils/editHistory";
-import type { EditHistoryStorageAdapter } from "../utils/editHistoryStorage";
+import { createMemoryEditHistoryStorage } from "../utils/editHistoryStorage";
 import { createSplitFetchMock, mountProbe } from "./useRazorSplit.testHelpers";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -167,16 +167,6 @@ describe("useRazorSplit — sub-comp coordinate rebasing", () => {
 
 // ── Bug 1: split must resync the SDK session so undo isn't refused ────────────
 
-const memoryStorage = (): EditHistoryStorageAdapter => {
-  const store = new Map<string, string>();
-  return {
-    load: async (k) => store.get(k) ?? null,
-    save: async (k, v) => {
-      store.set(k, v);
-    },
-  } as unknown as EditHistoryStorageAdapter;
-};
-
 interface UndoHarness {
   singleRef: { current: SingleSplit | undefined };
   disk: Record<string, string>;
@@ -191,7 +181,7 @@ function mountRazorSplitWithHistory(): UndoHarness {
   };
   const store = createPersistentEditHistoryStore({
     projectId: "p1",
-    storage: memoryStorage(),
+    storage: createMemoryEditHistoryStorage(),
     initialState: createEmptyEditHistory(),
     now: () => Date.now(),
     onChange: () => {},

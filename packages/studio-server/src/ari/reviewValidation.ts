@@ -27,6 +27,7 @@ export function validateReviewManifest(value: ReviewPackage, id: string) {
   )
     throw new Error("Tarkistuspaketin versiosidonta on vioittunut.");
   validateMedia(value);
+  validateOverview(value);
   if (
     !coverages.includes(value.coverage) ||
     !Array.isArray(value.coverageNotes) ||
@@ -105,4 +106,26 @@ function sampleMatches(
   if (sample.status === "outside-video") return sample.path === null;
   const frame = sample.path === null ? undefined : byPath.get(sample.path);
   return frame?.frame === sample.frame && frame.versionId === boundary.versionId;
+}
+
+function validateOverview(value: ReviewPackage) {
+  const o = value.overview;
+  if (!o) return; // Legacy packages remain readable.
+  const m = value.measured;
+  if (
+    o.path !== "overview.png" ||
+    !Number.isInteger(o.width) ||
+    !Number.isInteger(o.height) ||
+    o.width < 1 ||
+    o.height < 1 ||
+    !Array.isArray(o.samples) ||
+    o.samples.length !== Math.min(12, m.frames)
+  )
+    throw new Error("Kuvakooste on vioittunut.");
+  o.samples.forEach((s, i) => {
+    const expected =
+      o.samples.length === 1 ? 0 : Math.round((i * (m.frames - 1)) / (o.samples.length - 1));
+    if (s.frame !== expected || s.time !== s.frame / m.fps)
+      throw new Error("Kuvakoosteen ajat ovat vioittuneet.");
+  });
 }
